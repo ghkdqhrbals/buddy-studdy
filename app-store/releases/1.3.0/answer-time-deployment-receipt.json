@@ -1,0 +1,33 @@
+{
+  "sourceCommit": "d012df1683785e0d76b3f1a7ed84c9a134893b47",
+  "pullRequest": "https://github.com/ghkdqhrbals/buddy-studdy/pull/15",
+  "backend": {
+    "status": "success",
+    "sourceRun": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36414738795",
+    "deployRun": "https://github.com/ghkdqhrbals/personal-deploy/actions/runs/36415355234",
+    "receiverSourceShaVerified": true,
+    "receiverSourceRunIdVerified": "36414738795",
+    "image": "ghcr.io/ghkdqhrbals/buddystudy-backend:d012df1683785e0d76b3f1a7ed84c9a134893b47-jvm",
+    "digest": "sha256:420076acb5106b45ee91e1e30c8ab3db7b2ff4911bd289a1c284f99f10082ec3",
+    "deploymentState": "rollout-completed",
+    "swarmState": "completed",
+    "service": "buddystudy_backend",
+    "runningReplicas": 1,
+    "expectedTaskRunning": true,
+    "rolloutVerifiedAt": "2026-09-28T11:25:34Z",
+    "verificationMethod": "GitHub Actions and Swarm rollout state; no runtime health or smoke requests"
+  },
+  "validation": {
+    "backendTestsPassed": 61,
+    "iosTestsPassed": 298,
+    "iosGenericBuild": "success",
+    "physicalQAInstallAndLaunch": "success",
+    "physicalQAVisualReadback": "success: iPhone 16 Pro, iOS 26.6.2, Korean Records, dark mode",
+    "simulatorVisualLocales": [
+      "ko",
+      "en",
+      "ja"
+    ],
+    "physicalQAVisualVerifiedAt": "2026-09-28 20:43 KST"
+  }
+}

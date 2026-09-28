@@ -42,8 +42,9 @@ The panel order is:
 
 ## Capture and release source
 
-The final iOS integration source is
-`6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4`. Forty unchanged native panels were
+The screenshot integration source is
+`6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4`. The later build 127 source and
+submission are recorded separately below. Forty unchanged native panels were
 captured from `8ecc999d9f219fab2416566471e63f94a3228253`. The final integration
 restored record-list behavior affecting follow-up and custom-question screens,
 so those two fixtures were recaptured for all 10 sets. Each image's actual
@@ -56,12 +57,12 @@ device framing and a sparse BuddyStudy brand accent. No Top 10 ranking, download
 testimonial, or learning-speed claim is made. The benchmark concerns screenshot
 presentation, not control of Apple's ranking algorithm.
 
-## Release receipts
+## Initial build 126 receipts
 
 App Store Connect accepted version **1.3.0 (126)** for App Review on
-2026-09-28 at07:24:48 KST. Both the submission and app version are
-`WAITING_FOR_REVIEW`; the existing manual-release setting is retained.
-The public store does not switch to1.3.0 until approval and release.
+2026-09-28 at 07:24:48 KST. These receipts preserve that initial submission.
+It was subsequently canceled and replaced by build 127 below; its submission
+state is now `COMPLETE`. Manual release remains configured.
 
 - [Submission and final preflight](submission-receipt.json): exact selected
   binary, three metadata locales, and60 screenshot checksums/dimensions/order.
@@ -73,17 +74,35 @@ The public store does not switch to1.3.0 until approval and release.
 - [Backend and Push Admin deployment](deployment-receipt.json): successful
   separate workflows and immutable backend image digest.
 
-## Answer-time replacement candidate preparation
+## Answer-time replacement: build 127
 
-A replacement 1.3.0 candidate is being prepared to show answer submission times
-on Home cards and study records. Versioned `/api/v2/` responses provide the
-localized relative labels; records without an answer timestamp use their creation
-time. The existing Korean, English and Japanese release copy is retained with a
-short addition, and [candidate TestFlight notes](testflight-build-localizations.json)
-include checks for timestamp choice and app-language changes.
+App Store Connect accepted **1.3.0 (127)** for review on **2026-09-28 at
+20:48:45 KST**. Both the app version and its new submission were verified as
+`WAITING_FOR_REVIEW` at 20:50:02 KST. Release remains manual after approval.
+The selected build is `VALID` and `APP_STORE_ELIGIBLE`.
 
-These files are preparation only. The build126 receipts above describe the
-previous submission; they do not establish a new build, upload, backend rollout
-or replacement review submission. The next candidate requires its own verified
-build and submission receipts. Existing screenshots and manual release remain
-unchanged.
+The exact source is `d012df1683785e0d76b3f1a7ed84c9a134893b47`
+([implementation PR #15](https://github.com/ghkdqhrbals/buddy-studdy/pull/15)).
+It includes answer-first display and server-localized relative wording from
+versioned `/api/v2/` reads, with existing v1 contracts retained. The backend
+was deployed before replacing the review submission. The hint guidance from
+the prior backend change is also included in this source.
+
+- [Backend deployment receipt](answer-time-deployment-receipt.json): exact
+  source/run match, image digest and successful Swarm rollout; no runtime probe.
+- [Signed build receipt](answer-time-signed-build-receipt.json): successful
+  upload, IPA hash, production settings, Apple processing and three verified
+  TestFlight note locales.
+- [Replacement submission receipt](answer-time-submission-receipt.json): exact
+  selected build and new review item, final state and submission time.
+- [Verification](../../../docs/verification/2026-09-28-answer-timestamps.md):
+  61 backend tests, 298 iOS tests, generic iOS build, physical iPhone Records
+  check and Korean/English/Japanese simulator rendering.
+- [TestFlight notes](testflight-build-localizations.json): version-specific
+  checks, including timestamp choice and app-language changes.
+
+All 60 existing screenshots across 10 sets were reverified for checksum, order,
+dimensions and COMPLETE delivery. Reviewer account, contact information, review
+notes and other public metadata were preserved; only the three localized
+`whatsNew` values were updated alongside the build selection. The build 126
+receipts above remain historical evidence and are not the active submission.

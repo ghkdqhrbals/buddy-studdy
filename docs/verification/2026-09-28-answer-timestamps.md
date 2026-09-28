@@ -109,8 +109,31 @@ removed.
 Final log: `/tmp/buddystudy-time-v2-ios-tests-final.log`. Result bundle:
 `build/iOSSimulatorDerivedData/Logs/Test/Test-StudyMateiOS-2026.09.28_20-13-45-+0900.xcresult`.
 
-The follow-up's physical app installation and launch succeeded. A new visual
-readback was temporarily blocked by iPhone Mirroring's "iPhone in use" state;
-the initial answer-time screenshots above do not establish a fresh v2 rendering
-pass. Backend deployment and App Store submission receipts are recorded
-separately after release completion.
+The follow-up's physical app installation and launch succeeded. After the
+iPhone Mirroring "iPhone in use" condition cleared, the final separate QA app
+was visually checked on the iPhone 16 Pro at 20:43 KST: Korean Records in dark
+mode showed the response-fixture labels `11시간 전`, `23시간 전`, and `1일 전`
+fully visible alongside topic, difficulty, and score. Production/TestFlight and
+its drafts were not replaced. This physical check covers Records; feed and
+other locales were checked on the simulator below. Backend deployment and App
+Store submission receipts are recorded separately after release completion.
+
+Final v2 fixture rendering was also inspected on the disposable iPhone 17 Pro
+simulator: Korean Records showed `11시간 전` and `23시간 전`, English Home showed
+`1 hour ago`, `2 hours ago`, `4 hours ago`, and `5 hours ago`, and Japanese
+Records showed `11時間前` and `23時間前`. Each label was fully visible alongside
+the existing row metadata. These are offline synthetic response fixtures and do
+not replace physical-device or live-backend integration evidence.
+
+
+## Deployment and replacement review submission
+
+Implementation PR #15 was merged as `d012df1683785e0d76b3f1a7ed84c9a134893b47`.
+Backend source run `36414738795` and deploy receiver `36415355234` succeeded;
+receiver source SHA/run and image digest were checked independently. iOS release
+run `36414741343` successfully uploaded **1.3.0 (127)** from that same source.
+After Apple returned VALID/APP_STORE_ELIGIBLE, the previous waiting build 126
+submission was canceled, build 127 selected, localized notes updated, and the
+new submission verified as WAITING_FOR_REVIEW. Manual release, all screenshots,
+and reviewer access were preserved. See the [release receipts](../../app-store/releases/1.3.0/README.md#answer-time-replacement-build-127)
+for immutable IDs, hashes, timestamps and verification scope.
