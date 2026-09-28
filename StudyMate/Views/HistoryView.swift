@@ -712,8 +712,12 @@ struct HistoryRow: View {
 
                         Text("·")
 
-                        Text(record.question.createdAt, formatter: Self.dateFormatter)
+                        Text(StudyDateDisplayFormatter.relativeOrShortDateString(
+                            for: record.answeredAt ?? record.question.createdAt,
+                            language: strings.language
+                        ))
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -777,13 +781,6 @@ struct HistoryRow: View {
             .red
         }
     }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter
-    }()
 
 }
 

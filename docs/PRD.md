@@ -261,6 +261,7 @@ Tapping a public-question row opens its detail. The options and long-press menus
 ### Records
 
 1. Ungraded records appear first.
+   Question cards and record rows display the answer submission time when available, consistent with record details. Lists use the existing localized relative-time/short-date format to keep the timestamp visible; detail timestamp formatting remains unchanged. Unanswered questions and older records without an answer timestamp fall back to the question creation time. This display rule does not change feed ranking or pagination order.
 2. Completed question and voice records have no user-configurable retention limit. MySQL is the source of truth and records remain until the user deletes an individual record, clears all records, or withdraws the account.
 3. Records and record search load in 30-item pages as the user scrolls. The iOS in-memory view cache contains only pages fetched during the current session.
 4. Record detail uses one identity for question/answer content, type-specific feedback, publication, likes and comments. A compact type label distinguishes question from voice learning. Voice records show only an actually spoken score, if present, plus strengths, improvements and what was explored; they never invent correctness, a zero score or a grading state.

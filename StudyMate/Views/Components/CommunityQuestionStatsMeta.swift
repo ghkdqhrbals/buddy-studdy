@@ -35,7 +35,7 @@ struct CommunityQuestionTopMeta: View {
                 .accessibilityElement(children: .combine)
             }
 
-            Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: question.createdAt, language: language))
+            Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: question.answeredAt ?? question.createdAt, language: language))
                 .fixedSize(horizontal: true, vertical: false)
 
             Spacer(minLength: 0)
