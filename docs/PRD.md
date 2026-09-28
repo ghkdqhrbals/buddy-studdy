@@ -38,7 +38,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 1. User receives or manually creates a study question through the backend.
 2. User writes an answer draft that is preserved automatically.
-3. User can reveal the hint on demand.
+3. User can reveal the hint on demand. The backend instructs the question generator to provide one or two short thinking cues in the requested language and difficulty, without revealing the answer, answer-equivalent terms, correct option, numeric result, or decisive solution step. These instructions also apply to follow-up questions; the internal grading rubric remains complete. If no useful non-revealing hint is possible, the generator is instructed to return no hint. This is a generation instruction, not a guarantee of factual accuracy or a separate automated hint-quality check, and applies to newly generated questions only.
 4. User submits for grading. The backend accepts and persists the answer
    immediately, changes the question lifecycle from `UNGRADED` to `GRADING`,
    appends the lifecycle transition to the durable question event history, then
