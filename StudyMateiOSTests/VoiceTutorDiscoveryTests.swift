@@ -339,7 +339,7 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
 
         await fixture.appState.refreshVoiceTutorCreatedStudy(studyID: 99, validity: { true })
 
-        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v1/studies/99"])
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v2/studies/99"])
         XCTAssertEqual(
             URLComponents(url: try XCTUnwrap(fixture.requests.first?.url), resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "tl" })?.value,
@@ -358,7 +358,7 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
 
         await fixture.appState.refreshVoiceTutorCreatedStudy(studyID: 100, validity: { true })
 
-        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v1/studies/100"])
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v2/studies/100"])
         XCTAssertEqual(fixture.appState.backendStudyRooms.map(\.id), [100])
         XCTAssertEqual(fixture.appState.settings.studyCategories.map(\.id), ["42"])
         XCTAssertEqual(fixture.store.loadSettings().studyCategories.map(\.id), ["42"])
@@ -445,7 +445,7 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         XCTAssertEqual(fixture.appState.backendStudyRoom(id: 99)?.latestQuestion?.id, next.id)
         XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: next.id), "두 번째 문제의 키보드 초안")
         XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: record.id), "음성 통화 전에 작성한 초안")
-        XCTAssertEqual(fixture.requests.filter { $0.url?.path.hasPrefix("/api/v1/records/") == true }.count, 5)
+        XCTAssertEqual(fixture.requests.filter { $0.url?.path.hasPrefix("/api/v2/records/") == true }.count, 5)
         fixture.assertDraftsUnchanged()
     }
 
@@ -730,18 +730,18 @@ private final class VoiceDiscoveryAppFixture {
         switch (request.httpMethod, request.url?.path) {
         case ("GET", let path) where path?.hasPrefix("/api/v1/answer-processes/") == true:
             body = try XCTUnwrap(gradingProcessResponses[try XCTUnwrap(request.url?.lastPathComponent)])
-        case ("GET", let path) where path?.hasPrefix("/api/v1/records/") == true:
+        case ("GET", let path) where path?.hasPrefix("/api/v2/records/") == true:
             let recordID = try XCTUnwrap(request.url?.lastPathComponent)
             let record = try XCTUnwrap(recordResponses[recordID])
             beforeRecordResponse?()
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             body = String(decoding: try encoder.encode(record), as: UTF8.self)
-        case ("GET", "/api/v1/studies"):
+        case ("GET", "/api/v2/studies"):
             body = Self.serverStudyTreeResponse
-        case ("GET", "/api/v1/studies/99"):
+        case ("GET", "/api/v2/studies/99"):
             body = Self.voiceCreatedRootResponse
-        case ("GET", "/api/v1/studies/100"):
+        case ("GET", "/api/v2/studies/100"):
             body = Self.voiceCreatedChildResponse
         case ("POST", "/api/v1/auth/token"):
             body = """

@@ -1,6 +1,8 @@
 package com.buddystudy.backend.community.application.model
 
 import com.buddystudy.backend.common.application.model.PageResponse
+import com.buddystudy.backend.common.application.model.RecordTimeDisplay
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.study.application.model.GradingResultResponse
 import com.buddystudy.backend.study.application.model.ContentLocalizationResponse
@@ -40,6 +42,8 @@ data class CommunityQuestionResponse(
     /** Exact authenticated viewer ownership, independent of public author-profile availability. */
     @get:JsonProperty("isOwnedByMe")
     val isOwnedByMe: Boolean = false,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val timeDisplay: RecordTimeDisplay? = null,
 )
 
 data class CommunityQuestionsResponse(

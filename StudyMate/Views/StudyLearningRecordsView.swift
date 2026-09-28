@@ -183,7 +183,11 @@ private struct StudyLearningRecordRow: View {
                     Text(answer).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 HStack {
-                    Text(verbatim: record.createdAt.formatted(.dateTime.month().day().hour().minute().locale(strings.language.locale)))
+                    StudyTimeDisplayText(
+                        timeDisplay: record.commonRecord?.timeDisplay,
+                        timestamp: record.commonRecord?.answeredAt ?? record.createdAt,
+                        language: strings.language
+                    )
                     if record.translationPending { Text(strings.studyLearningTranslationPending) }
                 }
                 .font(.caption2).foregroundStyle(.secondary)

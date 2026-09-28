@@ -1382,7 +1382,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         language: AppLanguage = .korean
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
-            url: endpoint("api", "v1", "studies"),
+            url: endpoint("api", "v2", "studies"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -1407,7 +1407,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         language: AppLanguage = .korean
     ) async throws -> BackendStudyRoom {
         var components = URLComponents(
-            url: endpoint("api", "v1", "studies", String(studyID)),
+            url: endpoint("api", "v2", "studies", String(studyID)),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -2035,7 +2035,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         language: AppLanguage = .korean
     ) async throws -> BackendRecordsPage {
         var components = URLComponents(
-            url: endpoint("api", "v1", "records"),
+            url: endpoint("api", "v2", "records"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -2063,7 +2063,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         language: AppLanguage = .korean
     ) async throws -> BackendRecordsPage {
         var components = URLComponents(
-            url: endpoint("api", "v1", "records"),
+            url: endpoint("api", "v2", "records"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -2092,7 +2092,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             throw StudyLearningRecordsError.invalidResponse
         }
         var components = URLComponents(
-            url: endpoint("api", "v1", "studies", String(studyID), "learning-records"),
+            url: endpoint("api", "v2", "studies", String(studyID), "learning-records"),
             resolvingAgainstBaseURL: false
         )
         var items = [
@@ -2447,7 +2447,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> CommunityQuestionsResponse {
         let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var components = URLComponents(
-            url: endpoint("api", "v1", "public", "questions", "liked"),
+            url: endpoint("api", "v2", "public", "questions", "liked"),
             resolvingAgainstBaseURL: false
         )
         var queryItems = [
@@ -2477,7 +2477,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         view: LocalizedContentView = .localized
     ) async throws -> CommunityQuestion {
         var components = URLComponents(
-            url: endpoint("api", "v1", "public", "questions", questionID),
+            url: endpoint("api", "v2", "public", "questions", questionID),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -2988,7 +2988,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         recordID: String,
         language: AppLanguage
     ) async throws -> [StudyRecord] {
-        var components = URLComponents(url: endpoint("api", "v1", "records", recordID, "thread"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: endpoint("api", "v2", "records", recordID, "thread"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "tl", value: language.backendCode),
             URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
@@ -3121,7 +3121,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         view: LocalizedContentView = .localized
     ) async throws -> StudyRecord {
         var components = URLComponents(
-            url: endpoint("api", "v1", "records", recordID),
+            url: endpoint("api", "v2", "records", recordID),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -3310,9 +3310,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let parts = url.path.split(separator: "/").map(String.init)
         guard parts.count >= 3 else { return false }
         for index in 0...(parts.count - 3) where parts[index] == "api" {
-            if parts[index + 1] == "v2", parts.count >= index + 4,
-               parts[index + 2] == "public", parts[index + 3] == "questions" { return true }
-            guard parts[index + 1] == "v1" else { continue }
+            guard ["v1", "v2"].contains(parts[index + 1]) else { continue }
+            if parts[index + 1] == "v2", parts[index + 2] == "studies" { return true }
             if parts[index + 2] == "voice-tutor" { return true }
             if parts[index + 2] == "records" { return true }
             if parts.count >= index + 4,
@@ -5078,6 +5077,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var source: String
     var createdAt: Date
     var answeredAt: Date?
+    var timeDisplay: StudyTimeDisplay?
     var author: CommunityUserProfile?
     /// Viewer-specific server proof. Nil means an older response omitted it;
     /// false is authoritative and must not fall back to a cached profile.
@@ -5100,6 +5100,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case source
         case createdAt
         case answeredAt
+        case timeDisplay
         case author
         case isOwnedByMe
         case ownedByMe
@@ -5130,7 +5131,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         localization: RecordLocalizationMetadata? = nil,
         recordType: StudyRecordType = .question,
         voiceRecord: VoiceRecordContent? = nil,
-        isOwnedByMe: Bool? = nil
+        isOwnedByMe: Bool? = nil,
+        timeDisplay: StudyTimeDisplay? = nil
     ) {
         self.id = id
         self.recordType = recordType
@@ -5144,6 +5146,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         self.source = source
         self.createdAt = createdAt
         self.answeredAt = answeredAt
+        self.timeDisplay = timeDisplay
         self.author = author
         self.isOwnedByMe = isOwnedByMe
         self.likeCount = likeCount
@@ -5167,6 +5170,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         source = try container.decode(String.self, forKey: .source)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
+        timeDisplay = try container.decodeIfPresent(StudyTimeDisplay.self, forKey: .timeDisplay)
         author = try container.decodeIfPresent(CommunityUserProfile.self, forKey: .author)
         isOwnedByMe = try container.decodeIfPresent(Bool.self, forKey: .isOwnedByMe)
             ?? container.decodeIfPresent(Bool.self, forKey: .ownedByMe)

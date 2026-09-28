@@ -72,3 +72,18 @@ The public store does not switch to1.3.0 until approval and release.
   COMPLETE state and intended order.
 - [Backend and Push Admin deployment](deployment-receipt.json): successful
   separate workflows and immutable backend image digest.
+
+## Answer-time replacement candidate preparation
+
+A replacement 1.3.0 candidate is being prepared to show answer submission times
+on Home cards and study records. Versioned `/api/v2/` responses provide the
+localized relative labels; records without an answer timestamp use their creation
+time. The existing Korean, English and Japanese release copy is retained with a
+short addition, and [candidate TestFlight notes](testflight-build-localizations.json)
+include checks for timestamp choice and app-language changes.
+
+These files are preparation only. The build126 receipts above describe the
+previous submission; they do not establish a new build, upload, backend rollout
+or replacement review submission. The next candidate requires its own verified
+build and submission receipts. Existing screenshots and manual release remain
+unchanged.

@@ -261,6 +261,7 @@ Tapping a public-question row opens its detail. The options and long-press menus
 ### Records
 
 1. Ungraded records appear first.
+   Question cards, history rows, and study learning-record rows display the answer submission time when available. Versioned `/api/v2/` read responses supply localized relative labels such as `5분 전` and `2 hours ago` in `timeDisplay`; iOS displays that text verbatim and refreshes it on the next server read. Unanswered questions use question creation time. Older responses, changed answer timestamps, and mismatched UI languages use an absolute date until matching metadata arrives. Detail timestamp formatting, feed ranking, and pagination order remain unchanged. See [API v2 time display](API_V2_TIME_DISPLAY.md).
 2. Completed question and voice records have no user-configurable retention limit. MySQL is the source of truth and records remain until the user deletes an individual record, clears all records, or withdraws the account.
 3. Records and record search load in 30-item pages as the user scrolls. The iOS in-memory view cache contains only pages fetched during the current session.
 4. Record detail uses one identity for question/answer content, type-specific feedback, publication, likes and comments. A compact type label distinguishes question from voice learning. Voice records show only an actually spoken score, if present, plus strengths, improvements and what was explored; they never invent correctness, a zero score or a grading state.

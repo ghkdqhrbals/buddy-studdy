@@ -3,6 +3,7 @@ package com.buddystudy.backend.community.adapter.inbound.web
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.adapter.inbound.web.optionalPrincipal
+import com.buddystudy.backend.common.adapter.inbound.web.RecordTimeDisplayMapper
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystudy.backend.community.adapter.inbound.web.dto.CommunityCommentRequest
@@ -271,6 +272,29 @@ class CommunitySearchV2Controller(
         authentication: Authentication?,
     ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), view, limit, offset, authentication, sort, scope)
 
+    @Operation(summary = "List liked public questions with server-localized answer times")
+    @GetMapping("/public/questions/liked")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
+    suspend fun getLikedPublicQuestionsV2(
+        @RequestParam(required = false) query: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(required = false) tl: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
+        authentication: Authentication,
+    ) = community.getLikedPublicQuestionsV2(query, targetLanguage(tl, language), view, limit, offset, authentication)
+
+    @Operation(summary = "Fetch one public question with server-localized answer time")
+    @GetMapping("/public/questions/{id}")
+    suspend fun getPublicQuestionV2(
+        @PathVariable id: Long,
+        @RequestParam(required = false) tl: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
+        authentication: Authentication?,
+    ) = community.getPublicQuestionV2(id, targetLanguage(tl, language), view, authentication)
+
     @Operation(summary = "Resolve a native-ad slot fallback")
     @PostMapping("/native-ad-slots/{slotId}/fallback")
     suspend fun nativeAdSlotFallback(
@@ -320,6 +344,8 @@ interface CommunityWebPort {
     suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String = "recommended", scope: String = "all"): Any
     suspend fun getLikedPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any
     suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
+    suspend fun getLikedPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any
+    suspend fun getPublicQuestionV2(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun getComments(
@@ -359,11 +385,25 @@ class CommunityWebAdapter(
     override suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
         community.getPublicQuestions(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
 
-    override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String) =
-        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset), serverFeedSort, parseFeedScope(scope))
+    override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String): Any {
+        val page = community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset), serverFeedSort, parseFeedScope(scope))
+        return RecordTimeDisplayMapper(language).publicQuestions(page)
+    }
 
-    override suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String) =
-        community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset), serverFeedSort, parseFeedScope(scope))
+    override suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String): Any {
+        val page = community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset), serverFeedSort, parseFeedScope(scope))
+        return RecordTimeDisplayMapper(language).publicQuestions(page)
+    }
+
+    override suspend fun getLikedPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any {
+        val page = community.getLikedPublicQuestions(authentication.principalOrThrow(), query, language, view, safeLimit(limit, 100), max(0, offset))
+        return RecordTimeDisplayMapper(language).publicQuestions(page)
+    }
+
+    override suspend fun getPublicQuestionV2(id: Long, language: String, view: String, authentication: Authentication?): Any {
+        val question = community.getPublicQuestion(authentication.optionalPrincipal(), id, language, view)
+        return RecordTimeDisplayMapper(language).publicQuestion(question)
+    }
 
     override suspend fun getLikedPublicQuestions(
         query: String?,

@@ -11,8 +11,76 @@ final class VoiceCommonRecordTests: XCTestCase {
         let record = try decodeRecord(questionJSON())
         XCTAssertEqual(record.recordType, .question)
         XCTAssertNil(record.voiceRecord)
+        XCTAssertNil(record.timeDisplay)
         XCTAssertTrue(record.isCompletedRecord)
         XCTAssertEqual(record.gradingResult?.score, 90)
+    }
+
+    func testServerTimeDisplayDecodesAndPersistsWithoutChangingText() throws {
+        var object = questionJSON()
+        object["answeredAt"] = "2026-09-01T00:05:00Z"
+        object["timeDisplay"] = timeDisplayJSON()
+        let record = try decodeRecord(object)
+        let display = try XCTUnwrap(record.timeDisplay)
+        XCTAssertEqual(display.timestamp, record.answeredAt)
+        XCTAssertEqual(display.relativeText, "  3분 전\n")
+        XCTAssertEqual(display.language, "ko")
+        XCTAssertEqual(display.generatedAt.timeIntervalSince(display.timestamp), 180)
+        XCTAssertEqual(display.matchingText(timestamp: display.timestamp, language: .korean), "  3분 전\n")
+        let restored = try JSONDecoder().decode(StudyRecord.self, from: JSONEncoder().encode(record))
+        XCTAssertEqual(restored, record)
+        XCTAssertEqual(restored.timeDisplay, display)
+    }
+
+    func testServerTimeDisplaySurvivesPrivatePublicAndBrowseProjection() throws {
+        var object = questionJSON()
+        object["isPublic"] = true
+        object["answeredAt"] = "2026-09-01T00:05:00Z"
+        object["timeDisplay"] = timeDisplayJSON()
+        let record = try decodeRecord(object)
+        XCTAssertEqual(try XCTUnwrap(record.asCommunityQuestion(author: nil)).timeDisplay, record.timeDisplay)
+        XCTAssertEqual(record.asQuestionBrowseQuestion(author: nil).timeDisplay, record.timeDisplay)
+
+        var publicObject = publicJSON()
+        publicObject["answeredAt"] = object["answeredAt"]
+        publicObject["timeDisplay"] = timeDisplayJSON()
+        let question: CommunityQuestion = try decode(publicObject)
+        XCTAssertEqual(question.timeDisplay, record.timeDisplay)
+        XCTAssertEqual(question.timeDisplay?.timestamp, question.answeredAt)
+        publicObject.removeValue(forKey: "timeDisplay")
+        let legacy: CommunityQuestion = try decode(publicObject)
+        XCTAssertNil(legacy.timeDisplay)
+    }
+
+    func testServerTimeTextRequiresMatchingTimestampAndLocale() {
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let texts: [(AppLanguage, String)] = [(.korean, "3분 전"), (.english, "3 minutes ago"), (.japanese, "3分前")]
+        for (language, text) in texts {
+            let display = StudyTimeDisplay(
+                timestamp: timestamp, relativeText: text, language: language.backendCode,
+                generatedAt: timestamp.addingTimeInterval(180)
+            )
+            XCTAssertEqual(display.matchingText(timestamp: timestamp, language: language), text)
+            XCTAssertEqual(display.matchingText(timestamp: timestamp, language: nil), text)
+            XCTAssertNil(display.matchingText(timestamp: timestamp.addingTimeInterval(0.001), language: language),
+                "A cached label for question creation cannot describe a newly submitted answer.")
+            for other in AppLanguage.allCases where other != language {
+                XCTAssertNil(display.matchingText(timestamp: timestamp, language: other),
+                    "A cached label must not survive a change of app language.")
+            }
+        }
+    }
+
+    func testEmptyServerTimeTextFallsBackWithoutLocallyRecomputingRelativeTime() {
+        let timestamp = Date(timeIntervalSince1970: 100)
+        for text in ["", " ", "\n\t"] {
+            let display = StudyTimeDisplay(timestamp: timestamp, relativeText: text, language: "en", generatedAt: timestamp)
+            XCTAssertNil(display.matchingText(timestamp: timestamp, language: .english))
+            XCTAssertNil(display.matchingText(timestamp: timestamp, language: nil))
+        }
+        let saved = StudyTimeDisplay(timestamp: timestamp, relativeText: "3 minutes ago", language: "en", generatedAt: timestamp.addingTimeInterval(180))
+        XCTAssertEqual(saved.matchingText(timestamp: timestamp, language: .english), "3 minutes ago",
+            "The server owns this text even when the saved response was generated long ago.")
     }
 
     func testVoiceUsesCanonicalRecordIDAndCompletedWithoutFakeGrade() throws {
@@ -580,6 +648,83 @@ final class VoiceCommonRecordTests: XCTestCase {
         XCTAssertEqual(publicRecord.voiceRecord, record.voiceRecord)
     }
 
+    func testRecordReadsUseV2AndPreservePagingFiltersAndServerTimeDisplay() async throws {
+        var object = questionJSON()
+        object["answeredAt"] = "2026-09-01T00:05:00Z"
+        object["timeDisplay"] = timeDisplayJSON()
+        let fixture = try CommonRecordHTTPFixture(response: pageJSON([object], total: 100, offset: 30))
+        defer { fixture.close() }
+        let page = try await fixture.client.fetchRecords(
+            registration: fixture.registration, limit: 30, offset: 30, query: "anatomy terms", language: .english
+        )
+        XCTAssertEqual(page.records.first?.timeDisplay?.relativeText, "  3분 전\n")
+        var request = try XCTUnwrap(fixture.requests.last)
+        XCTAssertEqual(request.url?.path, "/api/v2/records")
+        var query = try requestQuery(request)
+        XCTAssertEqual(query["limit"], "30")
+        XCTAssertEqual(query["offset"], "30")
+        XCTAssertEqual(query["query"], "anatomy terms")
+        XCTAssertEqual(query["tl"], "en")
+        XCTAssertEqual(query["view"], "localized")
+
+        _ = try await fixture.client.fetchRecordsForStudy(
+            registration: fixture.registration, studyID: 41, limit: 20, offset: 40, language: .japanese
+        )
+        request = try XCTUnwrap(fixture.requests.last)
+        XCTAssertEqual(request.url?.path, "/api/v2/records")
+        query = try requestQuery(request)
+        XCTAssertEqual(query["studyId"], "41")
+        XCTAssertEqual(query["limit"], "20")
+        XCTAssertEqual(query["offset"], "40")
+        XCTAssertEqual(query["tl"], "ja")
+
+        fixture.response = object
+        let detail = try await fixture.client.fetchRecord(
+            registration: fixture.registration, recordID: "101", language: .korean, view: .original
+        )
+        request = try XCTUnwrap(fixture.requests.last)
+        XCTAssertEqual(request.url?.path, "/api/v2/records/101")
+        XCTAssertEqual(try requestQuery(request)["view"], "original")
+        XCTAssertEqual(detail.timeDisplay, page.records.first?.timeDisplay)
+
+        fixture.response = ["records": [object]]
+        let thread = try await fixture.client.fetchRecordThread(registration: fixture.registration, recordID: "101", language: .korean)
+        request = try XCTUnwrap(fixture.requests.last)
+        XCTAssertEqual(request.url?.path, "/api/v2/records/101/thread")
+        XCTAssertEqual(try requestQuery(request)["tl"], "ko")
+        XCTAssertEqual(thread.first?.timeDisplay, detail.timeDisplay)
+        XCTAssertEqual(fixture.requests.map(\.httpMethod), ["GET", "GET", "GET", "GET"])
+    }
+
+    func testLikedAndPublicDetailReadsUseV2WithServerTimeDisplay() async throws {
+        var object = publicJSON()
+        object["answeredAt"] = "2026-09-01T00:05:00Z"
+        object["timeDisplay"] = timeDisplayJSON()
+        let fixture = try CommonRecordHTTPFixture(response: ["questions": [object], "totalCount": 1, "limit": 20])
+        defer { fixture.close() }
+        let liked = try await fixture.client.fetchLikedPublicQuestions(
+            registration: fixture.registration, query: "anatomy", limit: 20, offset: 40, language: .japanese, view: .original
+        )
+        var request = try XCTUnwrap(fixture.requests.last)
+        XCTAssertEqual(request.url?.path, "/api/v2/public/questions/liked")
+        let query = try requestQuery(request)
+        XCTAssertEqual(query["query"], "anatomy")
+        XCTAssertEqual(query["offset"], "40")
+        XCTAssertEqual(query["tl"], "ja")
+        XCTAssertEqual(query["view"], "original")
+        XCTAssertEqual(liked.questions.first?.timeDisplay?.relativeText, "  3분 전\n")
+        fixture.response = object
+        let detail = try await fixture.client.fetchPublicQuestion(
+            registration: fixture.registration, questionID: "900", language: .english, view: .localized
+        )
+        request = try XCTUnwrap(fixture.requests.last)
+        XCTAssertEqual(request.url?.path, "/api/v2/public/questions/900")
+        XCTAssertEqual(try requestQuery(request)["tl"], "en")
+        XCTAssertEqual(try requestQuery(request)["view"], "localized")
+        XCTAssertEqual(detail.timeDisplay, liked.questions.first?.timeDisplay)
+        XCTAssertEqual(fixture.requests.map(\.httpMethod), ["GET", "GET"])
+    }
+
     func testAppStateCommonPagesAppendBothTypesWithoutTouchingDraftOrQuota() async throws {
         let fixture = try CommonRecordHTTPFixture(response: pageJSON([voiceJSON()], total: 2)); defer { fixture.close() }
         let app = fixture.makeApp()
@@ -702,14 +847,17 @@ final class VoiceCommonRecordTests: XCTestCase {
         await app.loadLikedCommunityQuestions(query: "synthetic")
         XCTAssertTrue(app.likedCommunityQuestions.isEmpty)
         XCTAssertFalse(app.isLoadingLikedCommunityQuestions)
-        XCTAssertEqual(fixture.requests.first?.url?.path, "/api/v1/public/questions/liked")
+        XCTAssertEqual(fixture.requests.first?.url?.path, "/api/v2/public/questions/liked")
         fixture.assertDraftPreserved(app)
     }
 
     func testCommonPrivateAndPublicEndpointsProtectBodyLogs() {
         for path in ["/api/v1/records", "/api/v1/records/900", "/api/v1/records/900/publicity",
                      "/api/v1/public/questions", "/api/v1/public/questions/liked", "/api/v1/public/questions/900/comments",
-                     "/api/v2/public/questions", "/api/v2/public/questions/search"] {
+                     "/api/v2/public/questions", "/api/v2/public/questions/search",
+                     "/api/v2/public/questions/liked", "/api/v2/public/questions/900",
+                     "/api/v2/records", "/api/v2/records/900", "/api/v2/records/900/thread",
+                     "/api/v2/studies", "/api/v2/studies/41", "/api/v2/studies/41/learning-records"] {
             XCTAssertTrue(RemotePushBackendClient.suppressesPrivateLearningBodies(for: URL(string: "https://records.test\(path)")))
         }
         XCTAssertFalse(RemotePushBackendClient.suppressesPrivateLearningBodies(for: URL(string: "https://records.test/api/v1/records-other")))
@@ -746,6 +894,15 @@ final class VoiceCommonRecordTests: XCTestCase {
         XCTAssertEqual(Set(values.map { $0.recordTypeLabel(.voiceTutor) }).count, 3)
         XCTAssertEqual(Set(values.map(\.commonRecordTitle)).count, 3)
         XCTAssertEqual(Set(values.map(\.voiceRecordTutorAnswer)).count, 3)
+    }
+
+    private func timeDisplayJSON() -> [String: Any] {
+        ["timestamp": "2026-09-01T00:05:00Z", "relativeText": "  3분 전\n", "language": "ko", "generatedAt": "2026-09-01T00:08:00Z"]
+    }
+
+    private func requestQuery(_ request: URLRequest) throws -> [String: String] {
+        let items = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+        return Dictionary(uniqueKeysWithValues: items.compactMap { item in item.value.map { (item.name, $0) } })
     }
 
     private let dateText = "2026-09-01T00:00:00Z"
@@ -839,9 +996,9 @@ final class CommonRecordHTTPFixture {
         CommonRecordURLProtocol.install({ [weak self] request in
             guard let self, request.httpMethod == "GET",
                   let path = request.url?.path,
-                  path == "/api/v1/records" || path.hasPrefix("/api/v1/records/") ||
+                  path == "/api/v2/records" || path.hasPrefix("/api/v2/records/") ||
                     path.hasPrefix("/api/v1/public/questions/") || path == "/api/v2/public/questions" ||
-                    path == "/api/v2/public/questions/search" else {
+                    path.hasPrefix("/api/v2/public/questions/") else {
                 XCTFail("This fixture only allows synthetic record reads")
                 throw URLError(.unsupportedURL)
             }

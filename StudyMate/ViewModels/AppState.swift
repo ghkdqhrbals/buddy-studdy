@@ -2220,6 +2220,27 @@ final class AppState: ObservableObject {
         let isKorean = language == .korean
         let isJapanese = language == .japanese
         let now = appClock.now
+        // Canned v2 response text for offline rendering; production wording
+        // comes only from timeDisplay in the backend response.
+        let recordTimeLabels: [String]
+        let feedTimeLabels: [String]
+        switch language {
+        case .korean:
+            recordTimeLabels = ["11시간 전", "23시간 전", "1일 전", "1일 전", "2일 전", "2일 전",
+                                "3일 전", "3일 전", "4일 전", "4일 전", "5일 전", "5일 전",
+                                "6일 전", "6일 전", "1주 전", "1주 전", "1주 전", "1주 전"]
+            feedTimeLabels = ["1시간 전", "2시간 전", "4시간 전", "5시간 전", "7시간 전", "8시간 전"]
+        case .english:
+            recordTimeLabels = ["11 hours ago", "23 hours ago", "1 day ago", "1 day ago", "2 days ago", "2 days ago",
+                                "3 days ago", "3 days ago", "4 days ago", "4 days ago", "5 days ago", "5 days ago",
+                                "6 days ago", "6 days ago", "1 week ago", "1 week ago", "1 week ago", "1 week ago"]
+            feedTimeLabels = ["1 hour ago", "2 hours ago", "4 hours ago", "5 hours ago", "7 hours ago", "8 hours ago"]
+        case .japanese:
+            recordTimeLabels = ["11時間前", "23時間前", "1日前", "1日前", "2日前", "2日前",
+                                "3日前", "3日前", "4日前", "4日前", "5日前", "5日前",
+                                "6日前", "6日前", "1週間前", "1週間前", "1週間前", "1週間前"]
+            feedTimeLabels = ["1時間前", "2時間前", "4時間前", "5時間前", "7時間前", "8時間前"]
+        }
         let rootTitles: [String]
         switch language {
         case .korean:
@@ -2413,7 +2434,13 @@ final class AppState: ObservableObject {
                 isPublic: index % 3 != 0,
                 likeCount: 4 + index,
                 commentCount: index % 5,
-                viewCount: 28 + index * 7
+                viewCount: 28 + index * 7,
+                timeDisplay: StudyTimeDisplay(
+                    timestamp: createdAt.addingTimeInterval(420),
+                    relativeText: recordTimeLabels[index],
+                    language: language.backendCode,
+                    generatedAt: now
+                )
             )
         }
         recordsState.replace(with: records)
@@ -2468,7 +2495,13 @@ final class AppState: ObservableObject {
                 likeCount: [18, 12, 27, 9, 21, 15][index],
                 commentCount: [5, 3, 8, 2, 6, 4][index],
                 viewCount: [142, 96, 211, 73, 168, 121][index],
-                isLikedByMe: index == 0
+                isLikedByMe: index == 0,
+                timeDisplay: StudyTimeDisplay(
+                    timestamp: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_100)),
+                    relativeText: feedTimeLabels[index],
+                    language: language.backendCode,
+                    generatedAt: now
+                )
             )
         }
         screenshotPublicQuestions = publicQuestions

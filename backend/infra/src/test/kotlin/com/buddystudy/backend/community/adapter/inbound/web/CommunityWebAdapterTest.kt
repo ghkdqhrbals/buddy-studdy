@@ -161,6 +161,12 @@ class CommunityWebAdapterTest {
     @Test
     fun `v2 ignores legacy client sorting while preserving search following and pagination`(): Unit = runBlocking {
         val useCase = mock(CommunityUseCase::class.java)
+        `when`(useCase.getPublicQuestionFeedV2(principal, "en", "localized", 100, 0, PublicFeedSort.RECOMMENDED, PublicFeedScope.FOLLOWING))
+            .thenReturn(emptyResponse(100, 0))
+        `when`(useCase.getPublicQuestionsV2(principal, "Redis", "ja", "original", 20, 7, PublicFeedSort.RECOMMENDED, PublicFeedScope.ALL))
+            .thenReturn(emptyResponse(20, 7))
+        `when`(useCase.getPublicQuestionFeedV2(null, "en", "localized", 20, 0, PublicFeedSort.RECOMMENDED, PublicFeedScope.ALL))
+            .thenReturn(emptyResponse(20, 0))
         val adapter = CommunityWebAdapter(useCase)
         adapter.getPublicQuestionFeedV2("en", "localized", 1000, -1, authentication, "views", "following")
         verify(useCase).getPublicQuestionFeedV2(principal, "en", "localized", 100, 0, PublicFeedSort.RECOMMENDED, PublicFeedScope.FOLLOWING)

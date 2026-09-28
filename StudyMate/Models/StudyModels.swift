@@ -2030,6 +2030,24 @@ struct RecordLocalizationMetadata: Codable, Equatable {
     }
 }
 
+/// Localized presentation from a v2 read response; raw dates remain the source
+/// for ordering. Never reuse text for a different answer or UI language.
+struct StudyTimeDisplay: Codable, Equatable {
+    var timestamp: Date
+    var relativeText: String
+    var language: String
+    var generatedAt: Date
+
+    func matchingText(timestamp: Date, language: AppLanguage?) -> String? {
+        guard self.timestamp == timestamp,
+              language == nil || self.language == language?.backendCode,
+              !relativeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return relativeText
+    }
+}
+
 struct StudyRecord: Codable, Equatable, Identifiable {
     var id: String
     var recordType: StudyRecordType
@@ -2041,6 +2059,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var topic: String
     var difficulty: Difficulty
     var answeredAt: Date?
+    var timeDisplay: StudyTimeDisplay?
     var isPublic: Bool
     var likeCount: Int
     var commentCount: Int
@@ -2073,6 +2092,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case topic
         case difficulty
         case answeredAt
+        case timeDisplay
         case isPublic
         case likeCount
         case commentCount
@@ -2119,7 +2139,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         parentRecordID: String? = nil,
         rootRecordID: String? = nil,
         followUpDepth: Int = 0,
-        source: String = "manual"
+        source: String = "manual",
+        timeDisplay: StudyTimeDisplay? = nil
     ) {
         self.id = id
         self.recordType = recordType
@@ -2131,6 +2152,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.topic = topic
         self.difficulty = difficulty
         self.answeredAt = answeredAt
+        self.timeDisplay = timeDisplay
         self.isPublic = isPublic ?? (recordType == .question)
         self.likeCount = likeCount
         self.commentCount = commentCount
@@ -2165,6 +2187,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
         difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? Difficulty(level: 5)
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
+        timeDisplay = try container.decodeIfPresent(StudyTimeDisplay.self, forKey: .timeDisplay)
         isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic)
             ?? backendBooleanContainer.decodeIfPresent(Bool.self, forKey: .publicValue)
             ?? (recordType == .question)
@@ -2231,7 +2254,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
             isLikedByMe: false,
             localization: localization,
             recordType: recordType,
-            voiceRecord: voiceRecord
+            voiceRecord: voiceRecord,
+            timeDisplay: timeDisplay
         )
     }
 }
