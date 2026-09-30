@@ -47,6 +47,12 @@ class QuestionPromptProviderTest {
         assertThat(prompt.userPrompt).contains("Return JSON only")
         assertThat(prompt.userPrompt).contains("\"rubric\"")
         assertThat(prompt.userPrompt).contains("weights totaling 100")
+        assertThat(prompt.userPrompt).contains("never add hidden requirements to the rubric")
+        assertThat(prompt.systemPrompt).contains(
+            "one self-contained question", "one explicit task",
+            "all assumptions, inputs, code, or options", "natural Korean sentences",
+            "Clarity takes priority over novelty and brevity", "simplify the scenario",
+        )
     }
 
     @Test

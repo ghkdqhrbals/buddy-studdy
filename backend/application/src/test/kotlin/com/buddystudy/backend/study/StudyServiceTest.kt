@@ -485,6 +485,54 @@ class StudyServiceTest {
         assertThat(response.localization?.answer?.displayLanguage).isEqualTo("ko")
     }
 
+    @Test
+    fun `grading completion queues one localized push with the result route even on replay`(): Unit = runBlocking {
+        val now = Instant.parse("2026-09-30T00:00:00Z")
+        for ((index, language) in listOf("ko", "en", "ja").withIndex()) {
+            val question = pendingQuestion(800L + index, "Redis")
+            questions.visibleRows += question
+            recordWriter.queue(principal.userId, question.id, "My answer", language, language, now)
+            val event = notificationOutbox.gradingEvents.last()
+            assertThat(notificationOutbox.commands).hasSize(index)
+
+            val completed = recordWriter.complete(event, GradedAnswer(80, true, "Good", "Because"), now)
+            val command = notificationOutbox.commands.last()
+            assertThat(completed.completed).isTrue()
+            assertThat(question.status).isEqualTo(QuestionStatus.GRADED)
+            assertThat(question.gradingStatus).isEqualTo(AnswerGradingStatus.COMPLETED)
+            assertThat(command.shouldPush).isTrue()
+            assertThat(command.userId).isEqualTo(principal.userId)
+            assertThat(command.deviceId).isEqualTo(question.deviceId)
+            assertThat(command.type).isEqualTo("STUDY_QUESTION")
+            assertThat(command.threadType).isEqualTo("study_question")
+            assertThat(command.threadId).isEqualTo(question.id.toString())
+            assertThat(command.deepLink).isEqualTo("buddystudy://records/${question.id}")
+            assertThat(command.eventId).isEqualTo("answer-graded-${question.id}-${event.requestId}")
+            assertThat(command.title).isEqualTo(listOf("채점이 완료됐어요", "Grading complete", "採点が完了しました")[index])
+            assertThat(command.body).doesNotContain("My answer", "Because")
+            assertThat(completed.outboxes).contains(
+                OutboxReference(com.buddystudy.backend.common.application.outbox.OutboxType.DOMAIN_EVENT, (index + 1).toLong()),
+            )
+            val replay = recordWriter.complete(event, GradedAnswer(80, true, "Good", "Because"), now)
+            assertThat(replay.outboxes).isEmpty()
+            assertThat(notificationOutbox.commands).hasSize(index + 1)
+        }
+    }
+
+    @Test
+    fun `failed or stale grading cannot enqueue a completion notification`(): Unit = runBlocking {
+        val now = Instant.parse("2026-09-30T00:00:00Z")
+        val question = pendingQuestion(810, "Redis")
+        questions.visibleRows += question
+        recordWriter.queue(principal.userId, question.id, "My answer", "ko", "ko", now)
+        val event = notificationOutbox.gradingEvents.single()
+        val grade = GradedAnswer(80, true, "Good", "Because")
+        assertThat(recordWriter.complete(event.copy(requestId = "stale"), grade, now).completed).isFalse()
+        recordWriter.fail(event, "Timeout", now)
+        assertThat(recordWriter.complete(event, grade, now).completed).isFalse()
+        assertThat(notificationOutbox.commands).isEmpty()
+    }
+
     private fun gradedQuestion(id: Long, topic: String) = question(id, topic).apply {
         status = QuestionStatus.GRADED
         answer = "Answer"

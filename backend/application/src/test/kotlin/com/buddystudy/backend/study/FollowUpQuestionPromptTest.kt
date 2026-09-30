@@ -17,6 +17,7 @@ class FollowUpQuestionPromptTest {
         val prompt = FollowUpQuestionPrompt.build(QuestionPromptProvider(), listOf(first, second), "en")
         assertThat(prompt.fallbackTopic).isEqualTo("Redis")
         assertThat(prompt.level).isEqualTo(7)
+        assertThat(prompt.systemPrompt).contains("one self-contained question", "one explicit task", "natural Korean sentences")
         assertThat(prompt.language).isEqualTo("en")
         assertThat(prompt.userPrompt).contains("Original prompt", "Original answer", "Missing atomicity", "Earlier follow-up", "Latest answer", "atomicity")
         assertThat(prompt.systemPrompt).contains("untrusted learning content", "Do not quote personal details", "coached study session")

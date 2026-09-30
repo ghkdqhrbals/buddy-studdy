@@ -2731,6 +2731,44 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertTrue(observed.value.contains("/api/v2/public/questions|all|20"))
     }
 
+    func testGradingCompletionPushPreservesDraftAndOnlyOpensResultOnTap() async throws {
+        let suiteName = "GradingCompletionPushTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+            StudyRemoteNotificationBridge.shared.resetForLogout()
+        }
+        let paths = LockedValue<[String]>([])
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        store.saveAnswerDraft("Unsubmitted answer", recordID: "other-question")
+        let client = makeClient { request in
+            paths.set(paths.value + [request.url?.path ?? ""])
+            return Self.response(for: request, statusCode: 200, body: #"{"ok":true,"unreadCount":0}"#)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.lastAnswer = "Unsubmitted answer"
+        let payload: [AnyHashable: Any] = [
+            "aps": ["alert": ["title": "채점이 완료됐어요", "body": "결과와 피드백을 확인해 보세요."], "sound": "default"],
+            "notificationId": "91",
+            "deepLink": "buddystudy://records/42"
+        ]
+        StudyRemoteNotificationBridge.shared.configure(appState: appState)
+        _ = await StudyRemoteNotificationBridge.shared.handleRemoteNotification(userInfo: payload, openStudy: false)
+        XCTAssertNil(appState.appRouteRequest)
+        XCTAssertEqual(appState.lastAnswer, "Unsubmitted answer")
+        XCTAssertFalse(paths.value.contains { $0.hasSuffix("/open") })
+
+        let opened = await appState.notificationLandingCoordinator.land(userInfo: payload)
+        XCTAssertTrue(opened)
+        XCTAssertEqual(appState.appRouteRequest?.route, .recordDetail(recordID: "42"))
+        XCTAssertEqual(appState.lastAnswer, "Unsubmitted answer")
+        XCTAssertEqual(store.loadAnswerDraft(recordID: "other-question"), "Unsubmitted answer")
+        let tracked = await waitUntil { paths.value.contains("/api/v1/notifications/91/open") }
+        XCTAssertTrue(tracked)
+    }
+
     func testNotificationOpenUsesAuthenticatedSourceWithoutChangingReadState() async throws {
         let sources = LockedValue<[String]>([])
         let client = makeClient { request in

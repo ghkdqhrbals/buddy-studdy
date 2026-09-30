@@ -112,7 +112,7 @@ class AnswerGradingService(
             runCatching { publisher.publishNow(completed.outboxes) }
                 .onFailure {
                     log.warn(
-                        "answer_translation_immediate_publish_failed eventId={} requestId={} recordId={} error={}",
+                        "answer_completion_immediate_publish_failed eventId={} requestId={} recordId={} error={}",
                         event.eventId,
                         event.requestId,
                         event.recordId,
