@@ -7,6 +7,8 @@ import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
+import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
@@ -297,9 +299,25 @@ class StudyRecordWriteService(
         )
         question.gradingLastEventId = progress.id
         val saved = questions.save(question)
+        val notificationId = redisOutbox.appendNotification(
+            NotificationRequestCommand(
+                eventId = "answer-graded-${saved.id}-${event.requestId}",
+                userId = event.userId,
+                deviceId = saved.deviceId,
+                type = "STUDY_QUESTION",
+                title = QuestionNotificationContentPolicy.gradingCompletedTitle(event.responseLanguage),
+                body = QuestionNotificationContentPolicy.gradingCompletedBody(event.responseLanguage),
+                threadType = "study_question",
+                threadId = saved.id.toString(),
+                deepLink = "buddystudy://records/${saved.id}",
+                shouldPush = true,
+            ),
+            now,
+        )
         return CompletedAnswerGrading(
             completed = true,
-            outboxes = translationRequests.appendRecordForSupportedLanguages(saved, now),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, notificationId)) +
+                translationRequests.appendRecordForSupportedLanguages(saved, now),
         )
     }
 

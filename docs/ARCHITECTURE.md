@@ -139,6 +139,7 @@ runtime comparison or rollback does not fork application behavior.
   - `AnswerGradingStreamListener` consumes the typed Redis domain event and runs evidence analysis, criticism, judging, and optional adjudication through `AnswerGradingService`. Each transition is persisted before it is exposed to clients; completion stores the AI decision and statistics dirty key atomically.
   - `question_grading_events` is the append-only grading lifecycle event store. Every row records both the detailed grading stage and the resulting question lifecycle state; `questions.status` and `questions.grading_last_event_id` are the current read projection updated in the same transaction. `GET /api/v1/answer-processes/{correlationId}` exposes request-scoped progress as a one-shot polling response. The iOS app sends the last durable event ID as `after`, receives all newer stages without gaps, and polls at the fixed three-second product interval while `questionStatus=GRADING` and the grading status is non-terminal. Leaving the screen cancels only status polling; an already-sent answer request is allowed to finish and persist its accepted state.
   - Stores generated questions in MySQL before sending APNs notifications.
+  - Successful asynchronous grading appends a `STUDY_QUESTION` completion notification to the transactional outbox together with the result and lifecycle event. Its event ID includes the record and grading request IDs; the locked completion guard suppresses replay and stale/failed requests. The existing notification/permission/APNs path delivers localized text and `buddystudy://records/{id}` without exposing the answer in the push. Immediate publication runs after commit and normal outbox recovery handles publication failures.
   - Owns community profiles, public question browsing metadata, question reports, and persistent per-user block relationships. Authenticated public-question lists, detail reads, and comment lists enforce the block relationship server-side so reinstalling the app or using another device cannot restore blocked content.
   - Treats anonymous identities as installation credentials rather than administrator-visible members. Admin user and quota queries exclude `ANONYMOUS` rows.
   - Records referral attribution only for a newly created account while it remains `PENDING_TERMS`; a retry of that unfinished sign-up may retain the same first accepted code, but an existing `ACTIVE` account is never attributed. Required-term activation is the reward boundary: when that account becomes `ACTIVE`, one transaction creates the referral and grants the inviter and new member one month of Plus (`TIER2`). A unique referred-account constraint, self-referral validation, deterministic grant identities, and row locking make retries idempotent and prevent partial two-sided rewards. Rewarded attribution is retained after an inviter withdraws: nullable inviter references anonymize the departed account without erasing the surviving member's referral, grant, or one-time redemption claim. Manual code redemption is attribution recovery within the server-defined short sign-up eligibility window, not an eligibility path for existing accounts.
@@ -783,3 +784,29 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS -configuration Debu
 ```
 
 Use real-device builds when changing push, entitlements, or background refresh behavior.
+
+Question clarity and grading-completion notification verification (2026-09-30):
+
+- Targeted backend tests passed: 35 application tests covering prompt inheritance,
+  localized completion commands, result routing, replay suppression, stale/failed
+  completion, and notification policy; 7 infrastructure tests covering notification
+  stream processing and APNs payloads. No external OpenAI call was made, so generated
+  question quality still needs evaluation with real learner examples.
+- The generic iOS Debug build above passed.
+- `QuestionGenerationFlowTests.testGradingCompletionPushPreservesDraftAndOnlyOpensResultOnTap`
+  passed on an iPhone 16 Pro using the `StudyMateiOS` scheme. This injects an APNs-shaped
+  payload and mocks backend responses: passive arrival preserves the draft, and an
+  explicit tap opens the completed record. The test target required the existing app
+  development team as a command-line `DEVELOPMENT_TEAM` override; project signing
+  settings were not changed.
+- End-to-end APNs transport for this new event has not been exercised against a
+  deployed backend. The implementation has not been deployed by this change.
+
+Deployment integration verification (2026-10-01): the grading-completion change
+was applied to current `main` (`2734239d`) while preserving its practical-question,
+difficulty, rubric-scope, and non-revealing-hint rules. Targeted application and
+notification/APNs infrastructure tests passed after increasing the local Kotlin
+compiler heap; the generic iOS Debug build passed. A repeat of the same physical
+iPhone test could not start because its destination was unavailable; the original
+2026-09-30 physical-device result above remains the device evidence. No iOS app
+release is part of this backend deployment.

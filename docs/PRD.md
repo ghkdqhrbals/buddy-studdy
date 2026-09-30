@@ -36,7 +36,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Study
 
-1. User receives or manually creates a study question through the backend.
+1. User receives or manually creates a study question through the backend. Generated questions, including follow-ups, must be self-contained: state the situation, necessary conditions, and one explicit task in natural language. Difficulty comes from the concept, not ambiguous wording. Rubrics assess only the stated task.
 2. User writes an answer draft that is preserved automatically.
 3. User can reveal the hint on demand. The backend instructs the question generator to provide one or two short thinking cues in the requested language and difficulty, without revealing the answer, answer-equivalent terms, correct option, numeric result, or decisive solution step. These instructions also apply to follow-up questions; the internal grading rubric remains complete. If no useful non-revealing hint is possible, the generator is instructed to return no hint. This is a generation instruction, not a guarantee of factual accuracy or a separate automated hint-quality check, and applies to newly generated questions only.
 4. User submits for grading. The backend accepts and persists the answer
@@ -59,7 +59,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
    completed question. The app resumes polling for a pending submitted answer;
    when no pending question exists it keeps showing the latest completed
    question, user answer, and AI response.
-6. Grading result, feedback, and explanation are stored in records.
+6. Grading result, feedback, and explanation are stored in records. Successful asynchronous grading also queues a localized completion push through the existing notification pipeline, subject to notification permissions. Tapping it opens that record’s result. Failed, stale, or replayed completions must not create another notification; arrival alone must not replace an active answer draft.
 7. Ungraded pending questions are capped at 3.
 8. Home exposes separate All Studies, My Studies, and My Study Tree scopes. My Studies preserves the compact hierarchical topic outline, while My Study Tree renders the selected root as an interactive node graph whose orientation can be switched between vertical and horizontal.
 9. A root study owns the question schedule, OpenAI model, and the single question flow. The backend owns the question prompt; iOS study creation and editing do not expose prompt overrides. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
