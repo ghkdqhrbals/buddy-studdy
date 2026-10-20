@@ -35,6 +35,18 @@ class RequestLoggingFilter(
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val requestId = UUID.randomUUID().toString()
+        exchange.attributes[REQUEST_ID_ATTRIBUTE] = requestId
+        exchange.response.headers.set(REQUEST_ID_HEADER, requestId)
+        val oauthStarted = System.nanoTime()
+        val segments = exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<PathContainer.PathSegment>().map { it.valueToMatch() }
+        if (segments.firstOrNull() == "oauth") {
+            // OAuth credentials, state, cookie values, codes and redirect Locations must never enter logs.
+            return chain.filter(exchange).doFinally {
+                log.info("oauth_request requestId={} method={} path={} status={} durationMs={}", requestId, exchange.request.method,
+                    exchange.request.path.value(), exchange.response.statusCode?.value() ?: 200, (System.nanoTime() - oauthStarted) / 1_000_000)
+            }
+        }
         val capturesBodies = loggingPolicy.capturesBodies &&
             !isMcpEndpoint(exchange) &&
             !isVoiceTutorEndpoint(exchange) &&

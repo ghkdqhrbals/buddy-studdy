@@ -83,6 +83,9 @@ jobs:
       VOICE_TUTOR_RECORDING_UPLOAD_COMPLETION_SAFETY_SECONDS: ${{ vars.VOICE_TUTOR_RECORDING_UPLOAD_COMPLETION_SAFETY_SECONDS || '300' }}
       VOICE_TUTOR_RECORDING_RETENTION_CRON: ${{ vars.VOICE_TUTOR_RECORDING_RETENTION_CRON || '0 * * * * *' }}
       VOICE_TUTOR_RECORDING_RETENTION_ZONE: ${{ vars.VOICE_TUTOR_RECORDING_RETENTION_ZONE || 'UTC' }}
+      MCP_OAUTH_ENABLED: ${{ vars.MCP_OAUTH_ENABLED || 'false' }}
+      MCP_OAUTH_CLIENT_ID: ${{ vars.MCP_OAUTH_CLIENT_ID || 'buddystudy-chatgpt' }}
+      MCP_OAUTH_REDIRECT_URIS: ${{ vars.MCP_OAUTH_REDIRECT_URIS || 'https://chatgpt.com/connector_platform_oauth_redirect' }}
 
     steps:
       - name: Checkout deployment configuration
@@ -376,6 +379,11 @@ jobs:
           VOICE_TUTOR_RECORDING_RETENTION_CRON=${VOICE_TUTOR_RECORDING_RETENTION_CRON}
           VOICE_TUTOR_RECORDING_RETENTION_ZONE=${VOICE_TUTOR_RECORDING_RETENTION_ZONE}
           MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED}
+          MCP_OAUTH_ENABLED=${MCP_OAUTH_ENABLED}
+          MCP_OAUTH_TRUST_PROXY=true
+          MCP_OAUTH_ISSUER=https://${BACKEND_DOMAIN}
+          MCP_OAUTH_CLIENT_ID=${MCP_OAUTH_CLIENT_ID}
+          MCP_OAUTH_REDIRECT_URIS=${MCP_OAUTH_REDIRECT_URIS}
           MCP_ALLOWED_HOSTS=${BACKEND_DOMAIN}
           MCP_ALLOWED_ORIGINS=
           MCP_REQUEST_TIMEOUT_SECONDS=30
@@ -665,6 +673,9 @@ jobs:
 
           http {
             resolver 127.0.0.11 valid=30s ipv6=off;
+            # Never log OAuth query strings (state/code) or redirect Locations.
+            log_format backend_safe '\$remote_addr \$request_method \$uri \$status';
+            access_log /var/log/nginx/access.log backend_safe;
 
             map \$http_upgrade \$connection_upgrade {
               default upgrade;

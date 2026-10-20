@@ -46,6 +46,25 @@ class RequestLoggingFilterTest {
     }
 
     @Test
+    fun `OAuth never logs credentials cookies query state or callback codes`(output: CapturedOutput): Unit = runBlocking {
+        execute(MockServerHttpRequest.post("/oauth/token?state=secret-state")
+            .header("Cookie", "secret-cookie").header("Authorization", "Bearer secret-token")
+            .contentType(MediaType.APPLICATION_FORM_URLENCODED).body("code=secret-code&code_verifier=secret-verifier")) { current ->
+            current.response.headers.set("Location", "https://chatgpt.com/?code=secret-callback")
+            writeJson(current, """{"access_token":"secret-access"}""")
+        }
+        assertThat(output.all).contains("oauth_request")
+        assertThat(output.all).doesNotContain("secret-state", "secret-cookie", "secret-token", "secret-code", "secret-verifier", "secret-callback", "secret-access")
+    }
+
+    @Test
+    fun `MCP metadata logging redacts authorization and cookie headers`(output: CapturedOutput): Unit = runBlocking {
+        execute(MockServerHttpRequest.post("/api/v1/mcp").header("Authorization", "Bearer secret-mcp-token")
+            .header("Cookie", "secret-mcp-cookie").body("{}")) { current -> writeJson(current, "{}") }
+        assertThat(output.all).doesNotContain("secret-mcp-token", "secret-mcp-cookie")
+    }
+
+    @Test
     fun `response body is preserved after reactive logging`(): Unit = runBlocking {
         val exchange = execute(MockServerHttpRequest.get("/api/v1/studies").build()) { current ->
             writeJson(current, """{"ok":true}""")

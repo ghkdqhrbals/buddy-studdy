@@ -50,6 +50,8 @@ wording, effective date, and any re-agreement requirement.
 | Optional Voice Tutor call recording | Only after explicit per-session `voice-recording-v1` consent and while the separately default-off feature is enabled, iOS captures both processing taps, aligns and mixes them into one AAC/M4A file, protects it from device backup, and uploads it directly through a short signed PUT. Private S3 stores the binary; MySQL stores consent version/time, object status, checksum, size, duration, and retention metadata | 30 days from the server-recorded call end by default, operator-configurable from 1–365 days; a same-contract pending upload renewal cannot extend that deadline, and a signed GET is not issued across it. The owner can delete immediately. Deletion removes all object versions and is physically retried minutely through the post-expiry upload safety deadline, then daily forever while metadata exists. Account withdrawal independently commits a permanent FK-free prefix-cleanup tombstone before relational deletion; it contains only the withdrawn numeric storage-namespace discriminator and retry metadata, tolerates initial S3 failure, and drives minutely-then-daily prefix deletion forever. The bucket must enforce lifecycle expiry for current/noncurrent versions and delete markers no later than configured recording retention. No-consent sessions have no upload grant or object |
 | Voice Tutor lesson history | MySQL: owned session/accounting and recording metadata, bounded ordered transcript text, and a separate private result containing summary, strengths, improvements, and next steps | Stored until account deletion except recording binaries, which follow the shorter configured retention. Account deletion removes voice quota, sessions, transcript turns, metadata, and results after independently committing the recording-prefix cleanup marker; private object deletion may finish asynchronously under that durable marker if S3 was unavailable |
 | User-authorized MCP access | Stateless HTTPS tools/resources expose the authenticated user's private profile, learning context, studies, questions, grading, topic statistics, and read-only Voice Tutor quota/session/result data to the MCP client selected by that user | No server-side MCP session; stored source data follows its normal retention. MCP may expose safe recording status metadata in owner-scoped session detail but never audio, object keys, or signed URLs; it cannot start, extend, explicitly end, stream, record, download, or delete a Voice Tutor session |
+| ChatGPT OAuth grants | MySQL: credential hashes, account/client identifiers, scopes, consent version/time, absolute expiry and used-refresh hashes; no app/device token passthrough | Pending login 10 minutes; access up to 15 minutes; connection up to 30 days, then bounded hourly deletion; account deletion cascades |
+| OAuth request limiting | Redis: hashed email/network/grant keys and counters | Up to one hour |
 | Translation | Self-hosted LibreTranslate first; OpenAI fallback | Translation results are stored with content localizations |
 | Notifications | APNs device token, notification preferences, notification and read state | Until device unregister, invalidation, or account deletion |
 | Terms agreements | Immutable MySQL action history with version, source, time, app version, IP and user agent | Until account deletion unless required for a legal dispute |
@@ -188,3 +190,11 @@ advertising. TIER2 and TIER3 do not receive an ad slot.
 
 This inventory records implemented behavior; it is not a substitute for
 professional legal advice.
+
+
+The read-only ChatGPT connection has a separate explicit consent version
+`learning-read-2026-10-20`. Publish the immutable KO/EN/JA connected-learning
+notices before activation. Only owned learning data is shared in this mode;
+private resume/interests and profile-context tools are excluded. OAuth bodies,
+queries, cookies and redirect Locations must not enter application or gateway logs.
+Disconnecting revokes future access, not previously shared ChatGPT content.

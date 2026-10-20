@@ -100,7 +100,8 @@ internal class ApiExchangeLogFormatter(
 
     private fun headers(headers: HttpHeaders): Map<String, Any?> =
         headers.headerNames().associateWith { name ->
-            headerValue(headers[name] ?: emptyList())
+            if (name.lowercase(Locale.ROOT) in setOf("authorization", "cookie", "set-cookie", "x-client-secret")) "[REDACTED]"
+            else headerValue(headers[name] ?: emptyList())
         }
 
     private fun body(captured: CapturedBody, headers: HttpHeaders): Any? {

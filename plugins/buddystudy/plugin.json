@@ -1,0 +1,35 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "buddystudy",
+  "version": "0.1.0",
+  "description": "Review your own BuddyStudy learning records, answers, feedback and topic statistics in ChatGPT.",
+  "author": {
+    "name": "BuddyStudy",
+    "email": "ghkdqhrbals@gmail.com"
+  },
+  "homepage": "https://ghkdqhrbals.github.io/buddy-studdy/",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "BuddyStudy",
+        "shortDescription": "Review your learning with ChatGPT",
+        "longDescription": "Connect your BuddyStudy account to read your study tree, questions, answers, feedback and topic-level learning statistics. Read-only access to your own account.",
+        "developerName": "BuddyStudy",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "websiteURL": "https://ghkdqhrbals.github.io/buddy-studdy/",
+        "privacyPolicyURL": "https://ghkdqhrbals.github.io/buddy-studdy/privacy.html",
+        "termsOfServiceURL": "https://ghkdqhrbals.github.io/buddy-studdy/terms.html",
+        "defaultPrompt": [
+          "Show my recent BuddyStudy learning records.",
+          "Help me review the topics I struggle with in BuddyStudy."
+        ],
+        "brandColor": "#245C48",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
+      }
+    }
+  }
+}

@@ -6,6 +6,8 @@ import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeLogger
 import com.buddystudy.backend.mcp.adapter.inbound.McpLoggingServerTransport
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpAdapter
+import org.springframework.beans.factory.annotation.Value
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.json.McpJsonMapper
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper
@@ -22,7 +24,9 @@ import java.time.Duration
 
 @Configuration
 @ConditionalOnProperty(prefix = "buddystudy.mcp", name = ["enabled"], havingValue = "true")
-class McpServerConfig {
+class McpServerConfig(
+    @Value("\${buddystudy.mcp.oauth.enabled:false}") private val oauthEnabled: Boolean = false,
+) {
     @Bean
     fun buddyStudyMcpJsonMapper(objectMapper: ObjectMapper): McpJsonMapper =
         JacksonMcpJsonMapper(objectMapper)
@@ -91,8 +95,8 @@ class McpServerConfig {
                 .resources(false, false)
                 .build(),
         )
-        .tools(mcp.tools())
-        .resources(mcp.resources())
+        .tools(mcp.tools().filter { !oauthEnabled || it.tool().name() in BuddyStudyMcpAdapter.OAUTH_READ_TOOLS })
+        .resources(mcp.resources().filter { !oauthEnabled || it.resource().uri() in BuddyStudyMcpAdapter.OAUTH_READ_RESOURCES })
         .build()
 
     private companion object {

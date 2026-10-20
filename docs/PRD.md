@@ -25,6 +25,22 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 - A user-started Buddy voice conversation call continues when the user opens another app or locks the device. Explicit end, leaving the call screen, account changes, actual audio interruptions, terminal connection failures, and the server quota deadline retain their normal termination behavior.
 - macOS DMG/Sparkle release is on hold until the macOS sync/update experience is revisited.
 
+## Optional ChatGPT Account Connection
+
+Registered users can connect BuddyStudy to ChatGPT through a read-only MCP plugin.
+The browser authenticates the existing account with an emailed one-time code,
+then requests explicit learning-data disclosure consent. The connection exposes
+only the account's study tree, questions, answers, grading feedback and topic
+statistics; it excludes administrator data, API keys, resumes and private profile
+context. It cannot generate, grade, edit or delete content and consumes no question
+quota. OAuth access tokens are separate from iOS sessions, expire within 15 minutes,
+and can refresh for at most 30 days. Users can revoke connections from the
+standalone connection-management page after fresh verification. Expiration,
+withdrawal and account deletion stop future access; previously shared ChatGPT
+content follows ChatGPT's own controls. See [MCP server](MCP_SERVER.md) and
+[plugin setup](../plugins/buddystudy/README.md). Production activation and public
+plugin publication are separate rollout steps.
+
 ## Core User Flows
 
 ### First Launch

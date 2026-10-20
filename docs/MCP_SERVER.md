@@ -12,8 +12,10 @@ use that same record identity; full voice session evidence stays owner-only. The
 update the private learning context, create root studies or child topics, request
 questions, submit answers, and delete a confirmed study subtree.
 
+The MCP transport uses Jackson 3 to match Spring AI’s schema-validator dependency; existing application persistence/response mapping remains on Jackson 2. A non-empty tool-list startup test covers this runtime compatibility boundary.
+
 The implementation targets MCP `2025-11-25` through Spring AI `2.0.1` and the
-MCP Java SDK `2.0.1`. It uses stateless Streamable HTTP so requests can be
+MCP Java SDK `2.0.1` with its Jackson 3 JSON/schema implementation. It uses stateless Streamable HTTP so requests can be
 served by any backend task without in-memory session affinity. The current
 Java SDK does not claim full support for the newer MCP `2026-07-28` protocol,
 so each intended host must be compatibility-tested before production rollout.
@@ -21,6 +23,72 @@ so each intended host must be compatibility-tested before production rollout.
 The server is disabled by default in every profile with
 `MCP_SERVER_ENABLED=false`. Do not enable production until the privacy notice
 and the client authorization model described under Rollout are approved.
+
+## End-user ChatGPT OAuth mode
+
+Set both `MCP_SERVER_ENABLED=true` and `MCP_OAUTH_ENABLED=true` to use the
+end-user connection. The portable plugin and exact ChatGPT registration settings
+are in [plugins/buddystudy](../plugins/buddystudy/README.md). This is an ordinary
+user account connection, not an administrator account integration.
+
+- OAuth protected-resource discovery: `/.well-known/oauth-protected-resource`
+  and `/.well-known/oauth-protected-resource/api/v1/mcp`.
+- Authorization-server discovery: `/.well-known/oauth-authorization-server`.
+- `GET /oauth/authorize`: validate the predefined public client, exact redirect,
+  response type, resource, scopes, state and S256 PKCE challenge; issue a
+  per-request HttpOnly Secure SameSite=Lax browser cookie.
+- `/oauth/connect.html`: KO/EN email-code login for an existing ACTIVE account,
+  followed by explicit consent to share learning data with the connected ChatGPT.
+  No signup, account linking, raw app token input or administrator login occurs.
+  Unknown and ambiguous emails cannot sign in. Apple relay addresses require
+  configured relay delivery. Request lifetime is 10 minutes, codes have 8 digits
+  and at most five attempts; Redis limits email and network request volume.
+- `POST /oauth/token`: form-encoded authorization-code + S256 exchange or rotating
+  refresh. A provided public client uses `token_endpoint_auth_methods_supported:
+  ["none"]`; no client secret, DCR or CIMD is used. `resource` is checked on
+  authorization and token requests. Every valid callback includes `iss` and state.
+- Access tokens last at most 15 minutes. Refresh authorization has an absolute
+  30-day lifetime from the initial consent and does not slide on renewal.
+  Without `offline_access`, the connection expires with its access token.
+- `POST /oauth/revoke` revokes a connection using its current access/refresh
+  credential. `GET /oauth/manage` provides fresh email-code login and a bounded
+  active-connection list with immediate disconnection. Management-only browser
+  requests cannot authorize a client. Existing app sessions can also use
+  `GET /api/v1/me/mcp-connections` and `DELETE /api/v1/me/mcp-connections/{id}`.
+
+Only eight tools are listed: `list_studies`, `get_study`,
+`list_pending_questions`, `get_question_process`, `list_records`, `get_record`,
+`get_topic_stats`, and `get_study_growth`. Only study and recent-record resources
+are listed. Handlers reject OAuth access to all writes, private profile, resume
+and interest context even if the caller knows an unlisted tool/resource name.
+Existing owner-scoped use cases and permission checks still apply. OAuth tokens
+are rejected by ordinary app APIs and app device tokens are rejected by MCP in
+OAuth mode. No question quota is consumed by these reads.
+
+Grant/code/access/refresh/browser-secret values are random; only their hashes are
+persisted, together with canonical resource, client, owner, scopes, expiry, and
+consent version/time. A MySQL row lock serializes redemption, rotation and
+revocation; consumed refresh hashes live in a separate FK-cascading table. Reuse
+of a redeemed refresh token revokes the whole connection. Expiry/withdrawal is
+checked on every token use and account deletion cascades to all OAuth data.
+Bounded hourly cleanup deletes expired grants and their replay evidence, including
+while the connection feature is disabled. Redis contains only hashed-key rate
+counters (one-hour TTL), not OAuth credentials or learning records.
+
+Browser POSTs require the configured exact Origin, a custom intent header and
+the per-request cookie. Pages and responses are no-store, frame-protected, and
+use a self-only CSP. OAuth bodies, query values, cookies and redirect Locations
+are excluded from application logs; backend Nginx uses a path-only access format.
+MCP bodies remain suppressed and credential headers are redacted.
+
+The immutable optional disclosure uses consent version `learning-read-2026-10-20`
+and has KO/EN/JA copies at `docs/**/chatgpt-connection-2026-10-20.html`. Publish
+these with the existing privacy policy before production activation. This
+optional disclosure does not replace existing required app terms or silently
+agree to them. Disconnecting does not delete already-shared ChatGPT content.
+Production rollout, actual SMTP/Apple relay delivery and ChatGPT registration,
+callback/refresh compatibility and public directory review are separate steps;
+a local plugin package is not a published directory listing.
 
 ## Scope and non-goals
 
@@ -48,7 +116,7 @@ Out of scope for this release:
 - starting, streaming, reconnecting, ending, extending, recording, uploading,
   downloading, or deleting a Voice Tutor session or recording;
 - a second record store or direct `UserDefaults`/client persistence path;
-- MCP OAuth 2.1 discovery, dynamic client registration, or scoped MCP tokens;
+- dynamic client registration (DCR), CIMD and public/anonymous tool access;
 - automatic production activation or deployment.
 
 ## Architecture
@@ -200,7 +268,7 @@ implicitly approve a mutation.
 - Methods: `POST`; stateless `GET` returns `405`
 - Content type: `application/json`
 - Required Accept values: `application/json, text/event-stream`
-- Authentication: `Authorization: Bearer <BuddyStudy access token>`
+- Authentication: `Authorization: Bearer <dedicated OAuth token>` in OAuth mode; a BuddyStudy app token only in controlled legacy mode.
 - Protocol compatibility: `2025-11-25`
 - Sessions: none
 
@@ -468,6 +536,11 @@ explicit user confirmation
 | `MCP_SERVER_ENABLED` | `false` | Registers the MCP route and server; explicit opt-in is required in every profile |
 | `MCP_ALLOWED_HOSTS` | BuddyStudy production/dev hosts plus loopback | Comma-separated exact or wildcard-port Host allowlist |
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated browser Origin allowlist; empty rejects supplied origins |
+| `MCP_OAUTH_ENABLED` | `false` | Enables OAuth routes/discovery and switches MCP to dedicated read-only tokens |
+| `MCP_OAUTH_TRUST_PROXY` | `false` | Trust gateway-overwritten `X-Real-IP` for rate limits; enable only with no direct backend exposure |
+| `MCP_OAUTH_ISSUER` | `https://api.ghkdqhrbals.org` | Canonical HTTPS origin; resource is the issuer plus `/api/v1/mcp` |
+| `MCP_OAUTH_CLIENT_ID` | `buddystudy-chatgpt` | Predefined public client ID, no client secret |
+| `MCP_OAUTH_REDIRECT_URIS` | `https://chatgpt.com/connector_platform_oauth_redirect` | Exact comma-separated callback allowlist |
 | `MCP_REQUEST_TIMEOUT_SECONDS` | `30` | Tool/resource timeout, clamped to 5–120 seconds |
 
 At least one allowed host is required when the server is enabled. Reverse
@@ -509,23 +582,25 @@ backend HTTPS origin.
 
 Before enabling production:
 
-1. Publish and register an immutable KO/EN/JA privacy-policy version that
-   explicitly covers optional resume/interests, Voice Tutor transcript/result
-   storage, and user-authorized MCP/LLM disclosure; collect any required
-   re-agreement.
-2. Prefer a short-lived, revocable, audience-bound MCP token with read/write
-   scopes and OAuth 2.1 protected-resource metadata over the normal app token.
-3. Define and enforce transaction-safe per-account study-tree write budgets,
-   plus edge rate limits, before exposing create/delete tools to automated hosts.
+1. For the read-only ChatGPT connection, publish the immutable KO/EN/JA
+   connected-learning disclosure and existing privacy policy. The browser records
+   separate optional consent; it must not silently agree to required app terms.
+2. Register the provided public client and exact ChatGPT callback, then enable
+   `MCP_OAUTH_ENABLED=true` with `MCP_SERVER_ENABLED=true`. Do not distribute
+   normal app tokens to third-party hosts.
+3. Keep the legacy write-capable mode private. It additionally requires a full
+   privacy-policy update covering optional resume/interests, required agreements,
+   transaction-safe per-account write budgets and edge rate limits before any
+   automated third-party write exposure.
 4. Set an exact production Host allowlist and only the browser Origins actually
    required by approved clients.
 5. Run host compatibility tests for initialize, tools/list, tools/call,
    resources/list, resources/read, asynchronous polling, and errors.
-6. Enable `MCP_SERVER_ENABLED=true` through the backend deployment module.
+6. Enable the two flags through the backend-only deployment module.
 7. Observe latency, authorization errors, quota errors, and unexpected MCP
    operation failures in existing dashboards without inspecting body content.
 
-Rollback is `MCP_SERVER_ENABLED=false` followed by a backend-only rollout. The
+Rollback is both `MCP_SERVER_ENABLED=false` and `MCP_OAUTH_ENABLED=false` followed by a backend-only rollout. The
 database table can remain safely unused; do not reverse the Flyway migration or
 delete user data during an application rollback. If the feature is retired,
 provide an explicit user-data export/deletion path before a later additive
@@ -537,9 +612,22 @@ migration removes storage.
 cd backend
 ./gradlew --no-daemon :application:test :infra:test :tutor:test
 ./gradlew --no-daemon :tutor:bootJar :tutor:processAot
+
+# Focused OAuth checks without Docker-dependent tutor test AOT context discovery:
+./gradlew --no-daemon :application:test --tests '*McpOAuthServiceTest' \
+  :infra:test --tests '*McpOAuth*Test' --tests '*BuddyStudyMcpAdapterTest' --tests '*RequestLoggingFilterTest' \
+  :tutor:test --tests '*McpServerConfigTest' --tests '*McpOAuthSecurityTest' -x :tutor:processTestAot
 ```
 
-The targeted suite covers learning-context normalization and deletion, R2DBC
+The OAuth suite verifies discovery, CSRF/browser-cookie checks, denied consent,
+exact callback/resource/client/PKCE checks, one-time code redemption, refresh replay
+revocation, expiry/withdrawal, account ownership, app-token separation, hidden and
+blocked write/private-context tools, JSON persistence, concurrent R2DBC code
+redemption, account FK cascade, and body/header log suppression. H2 exercises
+R2DBC transactions; the MySQL Flyway migration still needs MySQL verification.
+Browser QA uses a local API fixture and does not prove SMTP or live ChatGPT OAuth.
+
+The targeted suite also covers learning-context normalization and deletion, R2DBC
 insert/update/FK cascade, MCP tool contracts and destructive hints, bearer
 principal propagation, body-log suppression, transport media/Origin handling,
 and the `/api/**` authentication boundary. MySQL Testcontainers verification
@@ -551,3 +639,24 @@ requires a running Docker daemon.
 - [MCP 2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 - [Spring AI MCP server documentation](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html)
 - [MCP Java SDK 2.0.1](https://github.com/modelcontextprotocol/java-sdk/releases/tag/v2.0.1)
+
+
+### Local verification, 2026-10-20
+
+- Full `:application:test`: 372 passed; full `:infra:test`: 200 passed.
+- Tutor MCP transport/security selection: 8 passed, including non-empty tool
+  registration with the Jackson 3 schema validator.
+- `:tutor:bootJar` and `:tutor:processAot`: passed; OAuth controller/model binding
+  appears in generated native reachability metadata.
+- Final targeted R2DBC persistence checks passed after aligning pending-code
+  retention with its actual code expiry.
+- `node --check` for the browser script, plugin JSON parse, deployment-template
+  YAML parse, and `git diff --check`: passed.
+- CUA Playwright/local API fixture: KO email/code/consent, disconnect and empty
+  state, EN language switching, default desktop and 390×844 layout verified with
+  screenshots and no browser warnings/errors. Browser plugin/skill was absent;
+  the available CUA in-app browser's documented Playwright surface was used.
+- Docker was unavailable. MySQL Flyway/Testcontainers and tutor test AOT discovery
+  were not completed; targeted tutor tests excluded `:tutor:processTestAot`.
+- Not verified live: SMTP/Apple relay delivery, production deployment,
+  ChatGPT registration/callback/refresh, and public directory acceptance.

@@ -810,3 +810,29 @@ compiler heap; the generic iOS Debug build passed. A repeat of the same physical
 iPhone test could not start because its destination was unavailable; the original
 2026-09-30 physical-device result above remains the device evidence. No iOS app
 release is part of this backend deployment.
+
+## ChatGPT end-user OAuth boundary
+
+The optional ChatGPT plugin reuses the stateless `/api/v1/mcp` transport and owned
+learning use cases. OAuth discovery and `/oauth/*` browser/token endpoints belong
+to the same backend deployment. A provided public client uses authorization code
+with S256 PKCE, exact callback matching, resource binding and issuer identification.
+An existing account is authenticated with an emailed code; no app device session,
+account creation or identity merging occurs. HttpOnly Secure browser cookies,
+strict Origin/custom-header checks, CSP and explicit disclosure consent protect
+the browser flow. Tokens never appear in browser storage or OAuth logs.
+
+`McpOAuthService` implements `McpOAuthUseCase` and depends on the OAuth storage and
+email outbound ports. `McpOAuthWebAdapter` is the controller-facing port adapter;
+`McpOAuthPersistenceAdapter` owns R2DBC and Redis operations. Grant row locks make
+code redemption, refresh rotation and revocation transactional across backend
+tasks. Only credential hashes are persisted. Used-refresh hashes remain in a
+separate FK-cascading table until connection expiry so old-token replay can revoke
+the connection. Bounded scheduled cleanup removes expired grants and their ledger.
+
+In OAuth mode, the bearer filter accepts dedicated MCP tokens only at the MCP
+route and rejects them at ordinary app APIs. The verified principal supplies the
+user ID; callers cannot select an owner. MCP discovery hides all write and private
+profile tools/resources, and handlers enforce the read scope again before calling
+existing owner-scoped use cases and permission checks. iOS login remains unchanged.
+See [MCP_SERVER.md](MCP_SERVER.md) for lifetimes, flags and verification limits.

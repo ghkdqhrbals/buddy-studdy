@@ -1,5 +1,7 @@
 package com.buddystudy.backend.config
 
+import com.buddystudy.backend.mcpoauth.McpOAuthUseCase
+import org.springframework.beans.factory.annotation.Value
 import com.buddystudy.backend.auth.TokenProvider
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.RequirePermission
@@ -124,9 +126,17 @@ class BearerTokenFilter(
     private val objectMapper: ObjectMapper,
     private val errorResponseFactory: ApiErrorResponseFactory,
     private val loggingPolicy: ApiLoggingPolicy,
+    private val oauth: McpOAuthUseCase? = null,
+    @Value("\${buddystudy.mcp.oauth.enabled:false}") private val oauthEnabled: Boolean = false,
+    @Value("\${buddystudy.mcp.oauth.issuer:https://api.ghkdqhrbals.org}") private val oauthIssuer: String = "https://api.ghkdqhrbals.org",
 ) : WebFilter {
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val authorization = exchange.request.headers.getFirst("Authorization")
+        val mcp = exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<org.springframework.http.server.PathContainer.PathSegment>()
+            .map { it.valueToMatch() } == listOf("api", "v1", "mcp")
+        if (mcp && oauthEnabled) exchange.response.headers.set("WWW-Authenticate",
+            "Bearer resource_metadata=\"$oauthIssuer/.well-known/oauth-protected-resource/api/v1/mcp\", scope=\"learning:read\"")
         val filtered = if (authorization.isNullOrBlank()) {
             chain.filter(exchange)
         } else {
@@ -168,6 +178,14 @@ class BearerTokenFilter(
         }
 
         val rawToken = authorization.removePrefix("Bearer ").trim()
+        val isMcp = request.path.pathWithinApplication().elements()
+            .filterIsInstance<org.springframework.http.server.PathContainer.PathSegment>()
+            .map { it.valueToMatch() } == listOf("api", "v1", "mcp")
+        if (rawToken.startsWith("bs_mcp_") || (isMcp && oauthEnabled)) {
+            val principal = if (isMcp && oauthEnabled) oauth?.authenticate(rawToken) else null
+            if (principal == null) throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid MCP access token.")
+            return UsernamePasswordAuthenticationToken(principal, null, emptyList())
+        }
         if (!tokenProvider.validate(rawToken)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }

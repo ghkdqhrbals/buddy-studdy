@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>BuddyStudy · ChatGPT 연결</title>
+<link rel="stylesheet" href="/oauth/connect.css"><script src="/oauth/connect.js" defer></script>
+</head>
+<body>
+<main>
+<header><span class="brand">BuddyStudy</span><button id="language" type="button">English</button></header>
+<p class="eyebrow">BUDDYSTUDY × CHATGPT</p>
+<h1 data-ko="내 학습을 대화로 이어가세요" data-en="Bring your learning into the conversation">내 학습을 대화로 이어가세요</h1>
+<p data-ko="BuddyStudy 계정을 연결하면 ChatGPT에서 내 학습 기록을 살펴보고 복습할 수 있어요." data-en="Connect your BuddyStudy account to review your learning records in ChatGPT.">BuddyStudy 계정을 연결하면 ChatGPT에서 내 학습 기록을 살펴보고 복습할 수 있어요.</p>
+<section id="login">
+<form id="email-form">
+<label for="email" data-ko="BuddyStudy 계정 이메일" data-en="BuddyStudy account email">BuddyStudy 계정 이메일</label>
+<input id="email" type="email" autocomplete="email" maxlength="254" required>
+<p class="hint" data-ko="앱의 프로필에 표시된 이메일을 입력하세요. Apple 이메일 가리기를 사용했다면 릴레이 주소를 입력하세요." data-en="Use the email shown in your app profile. For Hide My Email, enter your Apple relay address.">앱의 프로필에 표시된 이메일을 입력하세요. Apple 이메일 가리기를 사용했다면 릴레이 주소를 입력하세요.</p>
+<button class="primary" type="submit" data-ko="인증번호 받기" data-en="Send verification code">인증번호 받기</button>
+</form>
+<form id="code-form" hidden>
+<label for="code" data-ko="이메일 인증번호" data-en="Email verification code">이메일 인증번호</label>
+<input id="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="one-time-code" required>
+<button class="primary" type="submit" data-ko="로그인" data-en="Sign in">로그인</button>
+<button id="change-email" type="button" data-ko="다른 이메일 사용" data-en="Use a different email">다른 이메일 사용</button>
+</form>
+</section>
+<section id="consent" hidden>
+<h2 data-ko="ChatGPT에 허용할 정보" data-en="Information you share with ChatGPT">ChatGPT에 허용할 정보</h2>
+<ul><li data-ko="내 스터디와 학습 주제" data-en="Your studies and learning topics">내 스터디와 학습 주제</li><li data-ko="질문, 내 답변, 점수와 피드백" data-en="Questions, your answers, scores and feedback">질문, 내 답변, 점수와 피드백</li><li data-ko="주제별 통계와 학습 추이" data-en="Topic statistics and learning trends">주제별 통계와 학습 추이</li></ul>
+<p class="hint" data-ko="조회한 학습 내용은 연결한 ChatGPT로 전달됩니다. 이 연결로 학습 내용을 생성·수정·삭제하거나 API 키, 이력서, 다른 사람의 기록을 조회할 수는 없습니다. 연결은 최대 30일간 유지되며 다시 연결할 때 재동의합니다." data-en="Retrieved learning content is shared with your connected ChatGPT. This connection cannot create, edit or delete content, or access API keys, resumes or other users’ records. Connections last up to 30 days, then require authorization again.">조회한 학습 내용은 연결한 ChatGPT로 전달됩니다. 이 연결로 학습 내용을 생성·수정·삭제하거나 API 키, 이력서, 다른 사람의 기록을 조회할 수는 없습니다. 연결은 최대 30일간 유지되며 다시 연결할 때 재동의합니다.</p>
+<button id="allow" class="primary" type="button" data-ko="동의하고 연결" data-en="Allow and connect">동의하고 연결</button>
+<button id="deny" type="button" data-ko="취소" data-en="Cancel">취소</button>
+</section>
+<section id="connections" hidden>
+<h2 data-ko="연결된 계정 관리" data-en="Manage connections">연결된 계정 관리</h2>
+<p class="hint" data-ko="연결을 해제하면 해당 연결의 조회 권한이 즉시 만료됩니다. 이미 ChatGPT 대화에 전달된 내용은 ChatGPT에서 별도로 관리해 주세요." data-en="Disconnecting immediately revokes access. Manage any content already shared in your ChatGPT conversations separately.">연결을 해제하면 해당 연결의 조회 권한이 즉시 만료됩니다. 이미 ChatGPT 대화에 전달된 내용은 ChatGPT에서 별도로 관리해 주세요.</p>
+<div id="connection-list"></div>
+</section>
+<p id="message" role="status" aria-live="polite"></p>
+<footer><a target="_blank" rel="noopener noreferrer" id="connection-notice" href="https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-connection-2026-10-20.html" data-ko="ChatGPT 연결 안내" data-en="ChatGPT connection notice">ChatGPT 연결 안내</a> · <a target="_blank" rel="noopener noreferrer" id="privacy" href="https://ghkdqhrbals.github.io/buddy-studdy/privacy.html" data-ko="개인정보 처리방침" data-en="Privacy policy">개인정보 처리방침</a></footer>
+</main>
+</body></html>

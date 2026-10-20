@@ -627,7 +627,13 @@ class BuddyStudyMcpAdapter(
             )
             .build()
         return McpStatelessServerFeatures.AsyncToolSpecification(definition) { context, request ->
-            val operation = mono { handler(principal(context), Arguments(request.arguments().orEmpty())) }
+            val operation = mono {
+                val current = principal(context)
+                val scopes = current.oauthScopes
+                if (scopes != null && ("learning:read" !in scopes || name !in OAUTH_READ_TOOLS))
+                    throw AccessDeniedException("OAuth connection is read only.")
+                handler(current, Arguments(request.arguments().orEmpty()))
+            }
             val result = if (readOnly) {
                 operation.retryWhen(
                     Retry.fixedDelay(1, Duration.ofMillis(250))
@@ -670,7 +676,13 @@ class BuddyStudyMcpAdapter(
             .mimeType(APPLICATION_JSON)
             .build()
         return McpStatelessServerFeatures.AsyncResourceSpecification(definition) { context, _ ->
-            val completed = mono { handler(principal(context)) }
+            val completed = mono {
+                val current = principal(context)
+                val scopes = current.oauthScopes
+                if (scopes != null && ("learning:read" !in scopes || uri !in OAUTH_READ_RESOURCES))
+                    throw AccessDeniedException("OAuth resource is outside the granted scope.")
+                handler(current)
+            }
                 .map { value -> resourceResult(uri, value) }
                 .onErrorResume { error ->
                     if (isCancellation(error)) Mono.error(error)
@@ -897,7 +909,9 @@ class BuddyStudyMcpAdapter(
 
     private class McpArgumentException(message: String) : RuntimeException(message)
 
-    private companion object {
+    companion object {
+        val OAUTH_READ_TOOLS = setOf("list_studies", "get_study", "list_pending_questions", "get_question_process", "list_records", "get_record", "get_topic_stats", "get_study_growth")
+        val OAUTH_READ_RESOURCES = setOf("buddystudy://studies", "buddystudy://records/recent")
         const val APPLICATION_JSON = "application/json"
         val READ_TIMEOUT: Duration = Duration.ofSeconds(10)
 

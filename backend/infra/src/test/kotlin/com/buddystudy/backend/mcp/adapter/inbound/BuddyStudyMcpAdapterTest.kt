@@ -924,6 +924,44 @@ class BuddyStudyMcpAdapterTest {
         }
     }
 
+    @Test
+    fun `OAuth learning scope never reaches write or private profile handlers`() {
+        var invoked = false
+        val instance = adapter(proxyUseCase { _, _ -> invoked = true; null })
+        val principal = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read"))
+        val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal))
+        for (name in listOf("create_study", "delete_study", "submit_answer", "update_my_learning_context", "get_my_context")) {
+            val result = call(instance, name, emptyMap(), context)
+            assertThat(result.isError()).isTrue()
+            assertThat(errorDetails(result)).containsEntry("status", 403)
+        }
+        assertThat(invoked).isFalse()
+    }
+
+    @Test
+    fun `OAuth reads preserve the authenticated owner principal`() {
+        val principal = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read"))
+        val instance = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("getRecord")
+            assertThat(arguments[0]).isEqualTo(principal)
+            mapOf("recordId" to 9)
+        })
+        val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal))
+        assertThat(call(instance, "get_record", mapOf("record_id" to 9L), context).isError()).isFalse()
+    }
+
+    @Test
+    fun `OAuth cannot read a private context resource by guessing its URI`() {
+        var invoked = false
+        val instance = adapter(proxyUseCase { _, _ -> invoked = true; null })
+        val principal = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read"))
+        val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal))
+        val spec = instance.resources().single { it.resource().uri() == "buddystudy://me/context" }
+        val result = spec.readHandler().apply(context, McpSchema.ReadResourceRequest("buddystudy://me/context", null)).block()!!
+        assertThat(result.contents().toString()).contains("PERMISSION_DENIED")
+        assertThat(invoked).isFalse()
+    }
+
     private fun adapter(useCase: BuddyStudyMcpUseCase = proxyUseCase { method, _ ->
         error("Unexpected use-case call: $method")
     }, mapper: ObjectMapper = jacksonObjectMapper().findAndRegisterModules()): BuddyStudyMcpAdapter = BuddyStudyMcpAdapter(

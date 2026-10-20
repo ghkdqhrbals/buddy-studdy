@@ -103,7 +103,7 @@ dependencies {
     implementation("org.aspectj:aspectjweaver")
     implementation("io.modelcontextprotocol.sdk:mcp-core")
     implementation("org.springframework.ai:mcp-spring-webflux")
-    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson3")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
     implementation("com.mysql:mysql-connector-j")

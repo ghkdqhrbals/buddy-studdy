@@ -16,6 +16,7 @@ data class Principal(
     val sessionId: Long,
     val anonymous: Boolean,
     val status: String = if (anonymous) "ANONYMOUS" else "ACTIVE",
+    val oauthScopes: Set<String>? = null,
 )
 
 @Component

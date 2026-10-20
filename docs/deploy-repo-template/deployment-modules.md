@@ -97,6 +97,22 @@ deployment.
   runtime detection. The checked-in Kubernetes/k3s manifests also pin
   `MCP_SERVER_ENABLED=false`; a local or alternate deployment must opt in
   explicitly regardless of the active Spring profile.
+- End-user ChatGPT OAuth belongs to that same Backend API module. Keep
+  `MCP_OAUTH_ENABLED=false` until the immutable connected-learning disclosure
+  is published and the exact ChatGPT callback is registered. Enabling it requires
+  both `MCP_SERVER_ENABLED=true` and `MCP_OAUTH_ENABLED=true`; it restricts MCP
+  to `learning:read`, accepts only dedicated OAuth tokens, and hides write and
+  private-profile tools. The backend workflow injects `MCP_OAUTH_ISSUER` from
+  `BACKEND_DOMAIN`, a provided public `MCP_OAUTH_CLIENT_ID` (default
+  `buddystudy-chatgpt`), and exact comma-separated `MCP_OAUTH_REDIRECT_URIS`.
+  The workflow also sets `MCP_OAUTH_TRUST_PROXY=true` because its gateway
+  overwrites `X-Real-IP` and the backend service is not exposed directly; leave
+  this false for directly reachable servers. PKCE S256 replaces a client secret. Never use wildcard callbacks. No
+  monitoring/container/port/SSH changes are needed. The backend Nginx access
+  format records `$uri` rather than full request URLs so OAuth codes and state
+  cannot leak into access logs. OAuth bodies, queries, cookies and redirect
+  Locations are excluded from application logs. SMTP and Redis remain the
+  existing backend dependencies; Redis only stores hashed-key rate counters.
 - Backend images support `native` and `jvm` runtime modes from one Dockerfile.
   JVM is the default for tag-triggered and manually dispatched releases. A
   manual image build may explicitly select native. Every build stamps the

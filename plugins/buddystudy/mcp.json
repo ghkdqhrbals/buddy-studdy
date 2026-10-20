@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "buddystudy": {
+      "type": "streamable-http",
+      "url": "https://api.ghkdqhrbals.org/api/v1/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "provided",
+              "clientId": "buddystudy-chatgpt",
+              "tokenEndpointAuthMethod": "none"
+            },
+            "resource": "https://api.ghkdqhrbals.org/api/v1/mcp",
+            "baseScopes": ["learning:read", "offline_access"]
+          }
+        }
+      }
+    }
+  }
+}

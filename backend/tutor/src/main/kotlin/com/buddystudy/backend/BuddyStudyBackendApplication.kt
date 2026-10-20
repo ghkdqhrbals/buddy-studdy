@@ -98,6 +98,10 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
     )
 
     private val jacksonBindingTypes = listOf(
+        "com.buddystudy.backend.mcpoauth.McpOAuthGrant",
+        "com.buddystudy.backend.mcpoauth.McpOAuthTokens",
+        "com.buddystudy.backend.mcpoauth.McpOAuthConnection",
+        "com.buddystudy.backend.mcpoauth.McpOAuthController\$BrowserInput",
         "com.buddystudy.backend.auth.application.model.AccessTokenResponse",
         "com.buddystudy.backend.auth.application.model.DeviceRegisterResponse",
         "com.buddystudy.backend.auth.application.model.EmailVerificationCodeResponse",
