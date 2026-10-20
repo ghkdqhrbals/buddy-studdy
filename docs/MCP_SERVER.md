@@ -730,3 +730,23 @@ listing text and five positive/three negative review scenarios. The live review
 account, end-to-end test execution and demo walkthrough are not yet verified.
 The OpenAI portal requires an authenticated publisher session before uploading.
 No draft ID or approval is claimed before the portal confirms one.
+
+Deployment receipt (2026-10-21): production backend image/runtime commit
+`4ced020dd232895b85693ef8662092bc7016ba15` was built on GitHub-hosted ARM
+and deployed via personal-deploy. Build/dispatch/watch run 39505464062 and
+backend deploy run 39506498650 both succeeded. Public docs run 39505468313
+succeeded. Manual post-deploy checks returned OAuth discovery metadata,
+matched all three static consent assets to the deployed commit, and rejected
+anonymous MCP with a 401 discovery challenge. These checks were performed
+locally; no runtime health or smoke gates were added to GitHub Actions.
+
+Public registration status: authenticated in Chrome, attempted upload, and the
+portal required a verified developer identity before allowing draft creation.
+Opened the individual Persona verification flow. Biometric-processing consent
+and identity evidence remain for the account owner; no consent was accepted,
+identity document uploaded, draft created, or plugin submitted. The portable
+manifest and MCP core schema validate; the documented OpenAI OAuth extension
+requires the portal's vendor-aware validator (the portable schema rejects vendor
+extensions). Five positive and three negative scenarios are packaged, but a
+dedicated reviewer account, live scenario validation and demo video remain
+required before submission.
