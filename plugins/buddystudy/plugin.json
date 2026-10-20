@@ -49,10 +49,10 @@
               "expected_behavior": "Use the selected owned study and one stable idempotency key, poll the accepted process and show the persisted question."
             },
             {
-              "description": "Submit and grade an answer",
-              "prompt": "Submit this exact answer to my current BuddyStudy question: An index speeds up reads but adds write overhead.",
+              "description": "Answer the question just presented without record IDs or submission commands. Setup: present one owned pending SQL question in the same conversation; the text below is the learner response, not a standalone request.",
+              "prompt": "An index speeds up reads but adds write overhead.",
               "tools_triggered": "list_pending_questions, submit_answer, get_grading_process",
-              "expected_behavior": "Preserve the exact answer, submit once and poll for saved grading feedback without inventing a score."
+              "expected_behavior": "Resolve the question just presented from conversation context, verify the owned pending record without asking for an ID, submit this exact learner answer once with its actual language, and poll saved grading feedback. Never substitute model-local praise or a fabricated score. Drafts and hint requests must not be submitted."
             },
             {
               "description": "Read feedback and request follow-up",

@@ -112,3 +112,27 @@ published plugin.
 Existing users with `TERMS_AGREEMENT_REQUIRED` can sign in at connection management
 and choose **Review required terms**. This records normal account agreements;
 OAuth learning tools do not accept legal terms on the user’s behalf.
+
+### Natural conversation acceptance gate
+
+ID-directed developer prompts are transport/CRUD evidence only. The original
+public demo is preparatory evidence and is not sufficient acceptance of the
+user-facing workflow. The ordinary Korean-answer case failed before the
+natural-conversation instruction update: ChatGPT praised the answer without
+submitting it, and incorrectly insisted on English. Public submission must not
+claim this case passed until the deployed update is refreshed in ChatGPT and
+verified with ordinary conversation, no IDs or special submission commands.
+
+The positive answer case now sets up a presented pending question and supplies
+only the learner's answer text. Expected behavior is canonical exact-answer
+submission and saved grading. Hints, explicit drafts and ambiguous multiple
+questions must not be silently submitted.
+
+Updated checkpoint: `ec113008` is deployed and the development installation's
+tools were refreshed. In a separate GPT-5.6 Sol conversation, an ordinary Korean
+answer was submitted, graded and re-read unchanged with no user-supplied IDs;
+“give me a follow-up to this” also generated the linked question. This resolves
+the tested missing-submission case. Language-consistent practice still fails:
+Korean presentation retained an English-answer penalty in the saved grading.
+Do not treat that language case, GPT-6 rendering, multi-question ambiguity or
+the whole public submission as verified by this limited success.

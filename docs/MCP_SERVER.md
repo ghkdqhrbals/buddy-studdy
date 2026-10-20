@@ -893,3 +893,28 @@ learner answer, polling saved grading, localizing question presentation, keeping
 IDs internal and asking by question/topic only when genuinely ambiguous. Drafts,
 hints, hypothetical and historical answers must not be submitted. Live validation
 of the updated instructions remains pending deployment and host tool refresh.
+
+Natural-conversation update `ec113008` passed 41 MCP-adapter tests, 15 transport
+tests and JVM bootJar/AOT. Image run 39516469465 and deploy run 39517239987
+completed successfully. ChatGPT's actual development connection was refreshed
+with **Refresh tools** before starting a separate conversation:
+https://chatgpt.com/c/6ad7fe46-a528-83ee-922f-56effa7a191c
+
+GPT-6 again failed to render its response. With GPT-5.6 Sol, the ordinary
+request to resume SQL-index practice presented the pending products/sku question
+in Korean without IDs. The learner entered only the original Korean answer,
+without an ID or submit/grade command. ChatGPT submitted it, polled grading,
+and returned 92/PARTIAL. A subsequent natural request to check whether the
+answer was saved re-read the identical text and GRADED/92 state. The original
+**answer-not-submitted** regression now passes for this tested context/model.
+Evidence: `/tmp/buddystudy-natural-answer-saved.png`.
+
+A separate locale defect remains: despite Korean practice presentation, grading
+penalized the original generated English-answer condition. This is **Failed**
+for language-consistent practice, not a completed localization fix. Do not
+claim the full natural Korean flow or public submission is ready from this run.
+
+The same new conversation also accepted “그럼 이거랑 연결해서 꼬리 질문 하나 줘.”
+and completed a BuddyStudy follow-up associated with the preceding answer.
+No user prompt in this new conversation supplied a record/study ID, tool name
+or special submit command. The normal response also omitted internal IDs.
