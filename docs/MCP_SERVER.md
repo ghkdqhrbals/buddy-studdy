@@ -790,4 +790,4 @@ consent. Permission grant and actual ChatGPT tool cases are pending the user's
 action-time confirmation. No tool-call success or public submission is claimed.
 The existing tester is reused; credentials are excluded from the package.
 Reviewer-login follow-up `040ce115` is tracked separately in backend run
-`39511124479` and Pages run `39511128060`; rollout remains in progress at this checkpoint.
+`39511124479` and Pages run `39511128060`; both completed successfully. The deploy repository backend run `39511886619` also succeeded. Live connect.html and connect.js match `040ce115` exactly, and public metadata continues to advertise management scopes. Actual ChatGPT tool calls, video and public submission remain pending the connection approval.
