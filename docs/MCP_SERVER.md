@@ -696,3 +696,13 @@ access, transfer to OpenAI, duration and revocation. Full processing and revocat
 details remain accessible through the existing connection-notice and privacy links.
 Verification: local-fixture consent screenshot fits a 390×844 viewport; no browser
 console errors. JavaScript syntax and whitespace checks passed.
+
+Centered authorization layout (2026-10-21): inspected the GitHub OAuth consent
+screenshot and OAuth.com's authorization-interface example before adjusting the
+UI. Centered the page vertically when space permits and centered the brand,
+heading, account, scope descriptions and notice copy. Kept equal-width cancel
+and allow buttons. Content scrolls naturally on short viewports.
+References: https://www.oauth.com/oauth2-servers/authorization/the-authorization-interface/
+and https://miro.medium.com/v2/resize%3Afit%3A1400/1%2AxbHVN3CVWVITnvSA_ZbD6w.png
+Verification: local-fixture desktop and 390×844 mobile screenshots checked;
+no console errors. Script syntax and whitespace checks passed.
