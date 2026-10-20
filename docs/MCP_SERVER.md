@@ -12,10 +12,10 @@ use that same record identity; full voice session evidence stays owner-only. The
 update the private learning context, create root studies or child topics, request
 questions, submit answers, and delete a confirmed study subtree.
 
-The MCP transport uses Jackson 3 to match Spring AI’s schema-validator dependency; existing application persistence/response mapping remains on Jackson 2. A non-empty tool-list startup test covers this runtime compatibility boundary.
+The MCP transport retains the current Jackson 2 wire mapper and explicit Jackson 3 schema validator, matching the deployed Spring AI boundary. Startup and HTTP schema tests cover this combination.
 
 The implementation targets MCP `2025-11-25` through Spring AI `2.0.1` and the
-MCP Java SDK `2.0.1` with its Jackson 3 JSON/schema implementation. It uses stateless Streamable HTTP so requests can be
+MCP Java SDK `2.0.1` with its explicit Jackson 3 schema validator. It uses stateless Streamable HTTP so requests can be
 served by any backend task without in-memory session affinity. The current
 Java SDK does not claim full support for the newer MCP `2026-07-28` protocol,
 so each intended host must be compatibility-tested before production rollout.
@@ -713,3 +713,20 @@ authorization reference. Removed repeated row rules, reduced heading weight,
 and placed equal-width actions in the card footer. Kept scope and processing
 copy. Local-fixture desktop and 390×844 screenshots checked with no console
 errors; JavaScript syntax and whitespace checks passed.
+
+Production integration (2026-10-21): replayed the OAuth/UI commits onto current
+remote main while retaining existing Voice Tutor, record APIs, MCP retries and
+logging. Renumbered the new migration to V125 after deployed V124. Retained the
+Jackson 2 transport with the explicit Jackson 3 validator and added an OAuth
+catalog test. OAuth application (12), focused infra (67) and tutor MCP/security
+(18) tests passed, as did bootJar and application AOT generation. Test AOT was
+excluded because unrelated MySQL Testcontainers contexts need Docker, which is
+unavailable locally. Migration version uniqueness and whitespace checks passed.
+The deploy repository configuration tests passed (132). OAuth activation is
+controlled by backend-only repository variables.
+
+Public-registration preparation: package includes the support URL, bounded
+listing text and five positive/three negative review scenarios. The live review
+account, end-to-end test execution and demo walkthrough are not yet verified.
+The OpenAI portal requires an authenticated publisher session before uploading.
+No draft ID or approval is claimed before the portal confirms one.

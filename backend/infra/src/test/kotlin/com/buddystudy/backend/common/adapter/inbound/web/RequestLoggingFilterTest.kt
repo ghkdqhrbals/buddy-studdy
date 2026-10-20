@@ -92,7 +92,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `api request and response are logged in a single exchange line without masking`(output: CapturedOutput): Unit = runBlocking {
+    fun `api exchange retains bodies while redacting credential headers`(output: CapturedOutput): Unit = runBlocking {
         val exchange = execute(
             MockServerHttpRequest.post("/api/v1/auth/google")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -115,10 +115,10 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"responseBody\":{\"accessToken\":\"app-token\"}")
         assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
         assertThat(output.out).contains("\"userId\":\"42\"")
-        assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
-        assertThat(output.out).contains("\"X-Client-Secret\":\"client-secret-value\"")
-        assertThat(output.out).contains("\"Cookie\":\"request-session=cookie-value\"")
-        assertThat(output.out).contains("\"Set-Cookie\":\"response-session=cookie-value\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
+        assertThat(output.out).contains("\"X-Client-Secret\":\"[REDACTED]\"")
+        assertThat(output.out).contains("\"Cookie\":\"[REDACTED]\"")
+        assertThat(output.out).contains("\"Set-Cookie\":\"[REDACTED]\"")
     }
 
     @Test
@@ -185,7 +185,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `compact api log includes unmasked headers and bodies but omits request identity`(output: CapturedOutput): Unit = runBlocking {
+    fun `compact api log redacts credential headers and omits request identity`(output: CapturedOutput): Unit = runBlocking {
         val requestBody = """{"topic":"Redis","accessToken":"secret-token"}"""
         val exchange = execute(
             request = MockServerHttpRequest.post("/api/v1/studies?source=dev")
@@ -209,7 +209,7 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"query\":\"source=dev\"")
         assertThat(output.out).contains("\"requestHeaders\":")
         assertThat(output.out).contains("\"X-App-Version\":\"1.0.16\"")
-        assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
         assertThat(output.out).contains("\"requestBody\":{\"topic\":\"Redis\",\"accessToken\":\"secret-token\"}")
         assertThat(output.out).contains("\"status\":200")
         assertThat(output.out).contains("\"responseHeaders\":")

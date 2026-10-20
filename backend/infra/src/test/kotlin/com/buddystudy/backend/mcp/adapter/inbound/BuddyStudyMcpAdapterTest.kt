@@ -930,7 +930,7 @@ class BuddyStudyMcpAdapterTest {
         val instance = adapter(proxyUseCase { _, _ -> invoked = true; null })
         val principal = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read"))
         val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal))
-        for (name in listOf("create_study", "delete_study", "submit_answer", "update_my_learning_context", "get_my_context")) {
+        for (name in listOf("create_root_study", "delete_study", "submit_answer", "update_my_learning_context", "get_my_context")) {
             val result = call(instance, name, emptyMap(), context)
             assertThat(result.isError()).isTrue()
             assertThat(errorDetails(result)).containsEntry("status", 403)

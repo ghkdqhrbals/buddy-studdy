@@ -784,3 +784,9 @@ deployment.
   deploy the backend or monitoring stack.
 - Nginx public routing changes: update the owning module workflow template and
   state which module is responsible for reloading nginx.
+
+ChatGPT OAuth activation is backend-only. The deploy workflow passes
+`MCP_SERVER_ENABLED`, `MCP_OAUTH_ENABLED`, the predefined public client and exact
+callback allowlist to the runtime. Production repository variables enable both
+flags; no monitoring module or runtime smoke gate is added. New deployments apply
+`V125__mcp_oauth_grants.sql` after the existing V124 migration.
