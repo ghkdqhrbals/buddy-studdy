@@ -877,3 +877,19 @@ and no video error. The local playback also reached ended=true. The verified URL
 is now in plugin.json and the rebuilt public-author ZIP. The preceding Pages
 run 39515852460 was skipped because publish_public defaults false; the succeeding
 explicit public run above is the deployment receipt.
+
+## Natural conversation regression (2026-10-21)
+
+The owner correctly identified that ID-directed API-like prompts do not validate
+the end-user flow. A live ordinary request, “SQL 인덱스 공부 좀 하자. 버디스터디에
+있는 걸로 문제 하나 내줘. 한국어로.”, generated record 194 and presented its question.
+However, submitting only the Korean answer text produced model-local praise and
+an unwanted English-answer requirement instead of a saved BuddyStudy submission.
+This is a **Failed** conversation case; earlier ID-based successes do not cover it.
+
+Server instructions and tool descriptions now require resolving natural references
+from the currently presented exercise, preserving and submitting an ordinary
+learner answer, polling saved grading, localizing question presentation, keeping
+IDs internal and asking by question/topic only when genuinely ambiguous. Drafts,
+hints, hypothetical and historical answers must not be submitted. Live validation
+of the updated instructions remains pending deployment and host tool refresh.

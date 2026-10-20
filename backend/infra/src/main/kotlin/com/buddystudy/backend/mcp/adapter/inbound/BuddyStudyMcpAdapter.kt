@@ -311,7 +311,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "request_question",
                 title = "Request a study question",
-                description = "Queue question generation for one owned study topic only when the user requests a new question. Read list_pending_questions for that exact study_id first and reuse its unanswered question unless the user explicitly skips it. Uses the existing question quota and never replaces an answer draft. Returns a correlation ID immediately; poll get_question_process until terminal=true.",
+                description = "Queue question generation for one owned study topic only when the user requests a new question. Read list_pending_questions for that exact study_id first and reuse its unanswered question unless the user explicitly skips it. Uses the existing question quota and never replaces an answer draft. Returns a correlation ID immediately; poll get_question_process until terminal=true, then read get_record in the requested language with view=localized and present the actual question. Resolve the study by name/context with list_studies; do not ask users for IDs or expose internal identifiers.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "study_id" to idProperty("Study topic ID."),
@@ -341,7 +341,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "submit_answer",
                 title = "Submit an answer for grading",
-                description = "Persist an answer and queue asynchronous grading. Returns a grading correlation ID; poll get_grading_process and then get_record for score and feedback.",
+                description = "Save the learner's exact answer to the BuddyStudy question currently presented in the conversation and queue grading. An ordinary answer in an active exercise is enough; users need not say submit, grade or give an ID. Resolve and verify the question from conversation context with list_pending_questions/get_record; if ambiguous ask by topic/question text, never by ID. Do not submit drafts, hint requests, quoted history or hypothetical answers. Preserve the actual answer language via source_language. Poll get_grading_process then get_record and report saved feedback, not your own score.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "record_id" to idProperty("Pending question record ID."),
