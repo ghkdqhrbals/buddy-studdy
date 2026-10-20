@@ -778,3 +778,16 @@ OAuth application tests (15), controller tests (10), persistence tests (2),
 request-logging tests (19), MCP host tests (18), AOT and bootJar passed. Chrome
 local-fixture password login reached scoped consent; this is not a live login.
 Publication targets KR/US/JP and uses verified identity GYUMIN HWANGBO.
+
+Deployment and live connection checkpoint (2026-10-21): learning commit
+`58326571` completed backend build/dispatch/watch run `39510230225` and deploy
+repository backend run `39511030766`, both successful. Pages run `39510234207`
+succeeded. Public OAuth metadata advertises read/write/delete/offline scopes;
+deployed connect.html and connect.js match that commit exactly. Chrome followed
+ChatGPT's real provided-client/PKCE callback flow, delivered the existing App
+Review account email code and verified that account, reaching actual scoped
+consent. Permission grant and actual ChatGPT tool cases are pending the user's
+action-time confirmation. No tool-call success or public submission is claimed.
+The existing tester is reused; credentials are excluded from the package.
+Reviewer-login follow-up `040ce115` is tracked separately in backend run
+`39511124479` and Pages run `39511128060`; rollout remains in progress at this checkpoint.
