@@ -92,19 +92,20 @@ The publication ZIP includes five positive and three negative review scenarios,
 listing metadata, public support/privacy/terms URLs, and the remote OAuth MCP
 configuration. It contains no reviewer credentials.
 
-The publisher completed identity submission on 2026-10-21. The OpenAI organization
-settings currently show **Identity in review**; the plugin portal still refuses
-draft creation until the publisher identity is verified. Do not start another
-Persona inquiry while the submitted one is being reviewed.
+The OpenAI organization shows **Verified** as of 2026-10-21. The plugin upload
+form offers the verified identity **GYUMIN HWANGBO**. The 0.2.0 package targets
+**KR, US and JP**, as selected by the owner.
 
-After approval, upload the ZIP at `https://platform.openai.com/plugins`, then use
-the actual domain verification token returned by the portal. Do not invent a
-plugin ID or a verification token. Before requesting review, run all packaged
-scenarios using an isolated sample-data account, record the live walkthrough,
-and enter reviewer credentials in the secure portal. OpenAI requires reviewer
-access that does not depend on interactive email codes or MFA; the current OAuth
-email-code login requires a supported reviewer-access path before submission.
-The existing app email/password login may provide the credential-verification
-boundary for that path, but no reviewer bypass or static verification code has
-been introduced. Policy attestations must be reviewed at the actual submission
-step. A prepared ZIP is not a submitted or published plugin.
+The learning backend rollout and real ChatGPT tester email authentication passed.
+The actual consent page is awaiting action-time permission approval; authenticated
+ChatGPT tool cases are **Not run**. No public draft has been uploaded or submitted.
+Existing EMAIL-provider password login supports reviewer access without OTP;
+credentials must remain outside this package and use the existing test account.
+
+Before requesting review, run all five positive and three negative packaged
+scenarios against the exact saved version, record and verify a live ChatGPT demo,
+and enter the existing tester credentials in the secure portal. Use the actual
+domain verification token returned by the portal. Do not invent a plugin ID or
+verification token. The authorized developer must complete legal/policy
+attestations at the actual submission step. A prepared ZIP is not a submitted or
+published plugin.
