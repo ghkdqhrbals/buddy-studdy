@@ -689,3 +689,10 @@ and previously shared conversation content. No accordion hides these disclosures
 KO/EN local-fixture browser QA passed at desktop and 390×844 mobile width with no
 console errors. Script syntax, whitespace checks and `:tutor:bootJar` passed.
 This check used mocked authentication, not live email or ChatGPT authorization.
+
+Consent layout follow-up (2026-10-21): use a conventional account-connection
+screen with three permission rows and two short paragraphs describing read-only
+access, transfer to OpenAI, duration and revocation. Full processing and revocation
+details remain accessible through the existing connection-notice and privacy links.
+Verification: local-fixture consent screenshot fits a 390×844 viewport; no browser
+console errors. JavaScript syntax and whitespace checks passed.
