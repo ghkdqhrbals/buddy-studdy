@@ -47,6 +47,7 @@ data class McpOAuthConnection(val id: String, val clientId: String, val expiresA
 data class McpEmailCredential(val userId: Long, val passwordHash: String)
 
 interface McpOAuthUseCase {
+    suspend fun verifiedBrowserPrincipal(id: String, browserSecret: String): Principal
     suspend fun passwordLogin(id: String, browserSecret: String, email: String, password: String, remoteAddress: String): Boolean
     suspend fun start(request: McpOAuthRequest): McpOAuthStart
     suspend fun restart(id: String, browserSecret: String, remoteAddress: String): McpOAuthStart

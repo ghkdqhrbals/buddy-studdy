@@ -83,6 +83,13 @@ class McpOAuthService(
     override suspend fun browserScopes(id: String, browserSecret: String): Set<String> =
         browserGrant(id, browserSecret).scope.split(' ').toSet()
 
+    @Transactional
+    override suspend fun verifiedBrowserPrincipal(id: String, browserSecret: String): Principal {
+        val grant = browserGrant(id, browserSecret)
+        require(grant.verified && grant.userId != null && grant.codeHash == null && grant.accessHash == null && store.activeUser(grant.userId)) { "invalid_request" }
+        return Principal(grant.userId, "mcp:${grant.id}", 0, false, oauthScopes = grant.scope.split(' ').toSet())
+    }
+
     override suspend fun cleanup(): Long = store.purgeExpired()
 
     @Transactional

@@ -27,6 +27,11 @@
 <button id="change-email" class="text-button back" type="button" data-ko="다른 이메일 사용" data-en="Use a different email">다른 이메일 사용</button>
 </form>
 </section>
+<section id="terms" aria-labelledby="screen-title" hidden>
+<form id="terms-form" class="permission-card">
+<div class="permission-body"><p class="hint" data-ko="BuddyStudy 이용에 필요한 약관입니다. 각 문서를 확인하고 동의해 주세요. ChatGPT 연결 권한은 다음 화면에서 별도로 확인합니다." data-en="Review the required BuddyStudy terms and choose whether to agree. ChatGPT access is confirmed separately on the next screen.">BuddyStudy 이용에 필요한 약관입니다. 각 문서를 확인하고 동의해 주세요. ChatGPT 연결 권한은 다음 화면에서 별도로 확인합니다.</p><div id="terms-list"></div></div>
+<div class="actions"><button id="terms-later" class="secondary" type="button" data-ko="나중에" data-en="Not now">나중에</button><button id="terms-agree" class="primary" type="submit" disabled data-ko="동의하고 계속" data-en="Agree and continue">동의하고 계속</button></div>
+</form></section>
 <section id="consent" aria-labelledby="screen-title" hidden>
 <div class="account"><span id="account-email"></span><button id="change-account" class="text-button" type="button" data-ko="계정 변경" data-en="Change account">계정 변경</button></div>
 <div class="permission-card">
@@ -49,7 +54,7 @@
 </section>
 <section id="connections" aria-labelledby="screen-title" hidden>
 <p class="hint" data-ko="연결을 해제하면 더 이상 내 기록을 조회할 수 없습니다. 이미 전달된 내용은 ChatGPT에서 별도로 관리하세요." data-en="Disconnecting stops future access. Manage content already shared with ChatGPT separately.">연결을 해제하면 더 이상 내 기록을 조회할 수 없습니다. 이미 전달된 내용은 ChatGPT에서 별도로 관리하세요.</p>
-<div id="connection-list"></div>
+<div id="connection-list"></div><button id="review-terms" class="text-button back" type="button" data-ko="필수 약관 확인" data-en="Review required terms">필수 약관 확인</button>
 </section>
 <p id="message" role="status" aria-live="polite"></p>
 <footer><a target="_blank" rel="noopener noreferrer" id="connection-notice" href="https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-connection-2026-10-20.html" data-ko="연결 안내" data-en="Connection notice">연결 안내</a><a target="_blank" rel="noopener noreferrer" id="privacy" href="https://ghkdqhrbals.github.io/buddy-studdy/privacy.html" data-ko="개인정보 처리방침" data-en="Privacy policy">개인정보 처리방침</a></footer>

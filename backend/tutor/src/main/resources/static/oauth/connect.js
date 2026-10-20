@@ -6,6 +6,7 @@ let stage = 'email';
 let passwordMode = false;
 let activeConnections = null;
 let grantedScopes = new Set();
+let pendingTerms = [];
 const message = document.getElementById('message');
 const emailInput = document.getElementById('email');
 const text = (ko, en) => language === 'ko' ? ko : en;
@@ -21,12 +22,14 @@ function translate() {
   const titles = {
     email: text(manage ? '연결 관리 로그인' : 'BuddyStudy 로그인', manage ? 'Manage connections' : 'Sign in to BuddyStudy'),
     code: text('이메일을 확인하세요', 'Check your email'),
+    terms: text('필수 약관 확인', 'Required terms'),
     consent: text('ChatGPT에 연결', 'Connect to ChatGPT'),
     connections: text('연결된 앱', 'Connected apps'),
   };
   const descriptions = {
     email: text('연결할 계정의 이메일을 입력하세요.', 'Enter your BuddyStudy account email.'),
     code: text(`${emailInput.value.trim()} 메일함을 확인하세요.`, `Enter the code sent to ${emailInput.value.trim()}.`),
+    terms: text('동의한 내용은 BuddyStudy 계정에 저장됩니다.', 'Your choices are saved to your BuddyStudy account.'),
     consent: text(grantedScopes.has('learning:write') ? 'ChatGPT에서 내 학습을 이어갑니다.' : 'BuddyStudy 학습 기록을 공유합니다.', grantedScopes.has('learning:write') ? 'Continue your learning in ChatGPT.' : 'Share your BuddyStudy learning records.'),
     connections: text('내 학습 기록에 접근할 수 있는 앱입니다.', 'Apps with access to your learning records.'),
   };
@@ -40,6 +43,7 @@ function setStage(next) {
   document.getElementById('login').hidden = !['email', 'code'].includes(stage);
   document.getElementById('email-form').hidden = stage !== 'email';
   document.getElementById('code-form').hidden = stage !== 'code';
+  document.getElementById('terms').hidden = stage !== 'terms';
   document.getElementById('consent').hidden = stage !== 'consent';
   document.getElementById('connections').hidden = stage !== 'connections';
   translate();
@@ -58,7 +62,7 @@ async function busy(action) {
   document.querySelectorAll('button').forEach(button => { button.disabled = true; });
   message.textContent = '';
   try { await action(); } catch (error) { message.textContent = error.message; }
-  finally { document.querySelectorAll('button').forEach(button => { button.disabled = false; }); }
+  finally { document.querySelectorAll('button').forEach(button => { button.disabled = false; }); syncTermsButton(); }
 }
 document.getElementById('login-method').addEventListener('click', () => {
   passwordMode = !passwordMode;
@@ -72,9 +76,57 @@ async function signedIn() {
   const session = await request('/oauth/session', {});
   grantedScopes = new Set(session.scopes);
   document.getElementById('account-email').textContent = emailInput.value.trim().toLowerCase();
+  if (!manage) {
+    pendingTerms = await request('/oauth/terms', {});
+    if (pendingTerms.length) { renderTerms(); setStage('terms'); return; }
+  }
+  await finishSignIn();
+}
+async function finishSignIn() {
   setStage(manage ? 'connections' : 'consent');
   if (manage) await showConnections();
 }
+function renderTerms() {
+  const list = document.getElementById('terms-list');
+  list.replaceChildren();
+  for (const term of pendingTerms) {
+    const row = document.createElement('div'); row.className = 'terms-row';
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.required = true; checkbox.dataset.code = term.code;
+    checkbox.addEventListener('change', syncTermsButton);
+    const title = document.createElement('span'); title.textContent = `${term.title} (${term.version})`;
+    label.append(checkbox, title);
+    const url = new URL(term.url);
+    if (url.protocol !== 'https:') throw new Error(text('약관 주소를 확인할 수 없습니다.', 'The terms URL could not be verified.'));
+    const link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = text('전문 보기', 'Read terms');
+    row.append(label, link); list.append(row);
+  }
+  syncTermsButton();
+}
+function syncTermsButton() {
+  const boxes = [...document.querySelectorAll('#terms-list input[type=checkbox]')];
+  document.getElementById('terms-agree').disabled = boxes.length === 0 || boxes.some(box => !box.checked);
+}
+document.getElementById('terms-form').addEventListener('submit', event => {
+  event.preventDefault();
+  busy(async () => {
+    const boxes = [...document.querySelectorAll('#terms-list input[type=checkbox]')];
+    if (!boxes.length || boxes.some(box => !box.checked)) return;
+    const agreements = pendingTerms.map(term => ({code: term.code, version: term.version, contentHash: term.contentHash, agreed: true}));
+    pendingTerms = await request('/oauth/terms/agree', {agreements});
+    if (pendingTerms.length) { renderTerms(); return; }
+    await finishSignIn();
+  });
+});
+document.getElementById('terms-later').addEventListener('click', () => busy(async () => {
+  if (manage) { await finishSignIn(); return; }
+  const result = await request('/oauth/consent', {allow: false}); location.assign(result.redirect);
+}));
+document.getElementById('review-terms').addEventListener('click', () => busy(async () => {
+  pendingTerms = await request('/oauth/terms', {});
+  if (pendingTerms.length) { renderTerms(); setStage('terms'); }
+  else message.textContent = text('필수 약관에 모두 동의한 상태입니다.', 'All required terms have been accepted.');
+}));
 document.getElementById('email-form').addEventListener('submit', event => {
   event.preventDefault();
   busy(async () => {

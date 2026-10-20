@@ -64,7 +64,7 @@ for ChatGPT; local Codex callbacks are not enabled by this configuration.
 
 1. Connect BuddyStudy in ChatGPT.
 2. Enter the email shown in BuddyStudy's app profile and the emailed 8-digit code, or use the existing password for an email-registered account.
-3. Review and allow the requested learning read, write and deletion permissions to ChatGPT.
+3. Review any pending required account terms and explicitly agree if desired, then separately allow the requested learning read, write and deletion permissions to ChatGPT.
 4. Ask “Show my recent learning records” or “Which topics should I review?”
 5. Manage or revoke connections at `https://api.ghkdqhrbals.org/oauth/manage`.
 
@@ -108,3 +108,7 @@ domain verification token returned by the portal. Do not invent a plugin ID or
 verification token. The authorized developer must complete legal/policy
 attestations at the actual submission step. A prepared ZIP is not a submitted or
 published plugin.
+
+Existing users with `TERMS_AGREEMENT_REQUIRED` can sign in at connection management
+and choose **Review required terms**. This records normal account agreements;
+OAuth learning tools do not accept legal terms on the user’s behalf.

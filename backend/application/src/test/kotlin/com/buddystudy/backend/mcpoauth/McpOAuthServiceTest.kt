@@ -25,6 +25,21 @@ class McpOAuthServiceTest {
         "$issuer/api/v1/mcp", "learning:read offline_access", "code", "S256")
 
     @Test
+    fun `browser policy identity requires verification active owner and matching secret`(): Unit = runBlocking {
+        val start = service.start(request())
+        assertThat(runCatching { service.verifiedBrowserPrincipal(start.id, start.browserSecret) }.isFailure).isTrue()
+        service.sendCode(start.id, start.browserSecret, "user@example.com", "ip")
+        service.verifyCode(start.id, start.browserSecret, sentCode)
+        assertThat(service.verifiedBrowserPrincipal(start.id, start.browserSecret).userId).isEqualTo(7)
+        assertThat(runCatching { service.verifiedBrowserPrincipal(start.id, "wrong") }.isFailure).isTrue()
+        store.active = false
+        assertThat(runCatching { service.verifiedBrowserPrincipal(start.id, start.browserSecret) }.isFailure).isTrue()
+        store.active = true
+        service.consent(start.id, start.browserSecret, true)
+        assertThat(runCatching { service.verifiedBrowserPrincipal(start.id, start.browserSecret) }.isFailure).isTrue()
+    }
+
+    @Test
     fun `password login verifies an existing active email identity but never bypasses consent`(): Unit = runBlocking {
         val start = service.start(request())
         assertThat(runCatching { service.passwordLogin(start.id, "wrong", "user@example.com", "fixture-password", "ip") }.isFailure).isTrue()

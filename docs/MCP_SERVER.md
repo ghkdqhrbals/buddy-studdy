@@ -816,3 +816,20 @@ Remaining dependency: authorized acceptance of the existing tester account's
 latest required app terms through the normal account flow, followed by remaining
 live cases, verified demo and submission setup. The granted MCP learning scopes
 do not include accepting account terms. No public draft or review was submitted.
+
+## Browser account-terms flow
+
+A verified, active account can review and explicitly accept its pending required
+terms through POST `/oauth/terms` and `/oauth/terms/agree`. These routes require
+the same exact Origin, custom intent and fresh browser-secret cookie as email
+verification; MCP bearer tokens and caller-selected user IDs cannot authorize
+them. The browser identity is valid only before authorization-code/token issuance,
+keeping the ten-minute browser session separate from the longer OAuth grant.
+
+The adapter reuses `TermsUseCase` and its existing agreement ledger with source
+`REQUIRED_GATE`. It validates all selected codes, versions, hashes and explicit
+checkbox choices before any write. Optional terms are excluded; stale or partial
+selections fail, and an exact replay cannot duplicate accepted entries. The form
+starts unchecked, links each current document and separates legal acceptance
+from ChatGPT OAuth consent. Normal connection management and revocation remain
+available without agreement; “Review required terms” is an explicit action.

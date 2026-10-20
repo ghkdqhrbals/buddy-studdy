@@ -61,3 +61,8 @@ footer a { color: #737373; text-underline-offset: 3px; }
 .consent-details p { color: #525252; font-size: 12px; line-height: 1.7; margin: 0 0 8px; word-break: keep-all; overflow-wrap: anywhere; }
 .consent-details p:last-child { margin-bottom: 0; }
 #consent:not([hidden]) ~ footer { margin-top: 20px; }
+
+.terms-row { padding: 16px 0; border-top: 1px solid var(--line); }
+.terms-row label { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 8px; line-height: 1.6; }
+.terms-row input[type=checkbox] { width: 18px; height: 18px; margin: 3px 0 0; flex-shrink: 0; accent-color: #171717; }
+.terms-row a { display: inline-block; margin-left: 28px; color: #525252; font-size: 13px; }
