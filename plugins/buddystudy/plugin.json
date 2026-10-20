@@ -86,7 +86,8 @@
           ]
         },
         "commerce": false,
-        "commerce_description": "This connection does not sell products or process payments."
+        "commerce_description": "This connection does not sell products or process payments.",
+        "demo_recording_url": "https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-10-21.html"
       },
       "publication": {
         "release_notes": "Learning management with separate read, write and deletion consent; study and topic creation, questions, answer submission, grading, follow-ups and confirmed deletion.",

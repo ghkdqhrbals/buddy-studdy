@@ -869,3 +869,11 @@ recording is `docs/assets/chatgpt-demo-2026-10-21.mp4` (72 seconds); it contains
 only synthetic learning data and hides unrelated chat titles. Playback was
 verified in Chrome. It demonstrates read/statistics, answer submission/grading
 and refusal; it does not yet demonstrate deletion.
+
+Public demo hosting: Pages workflow 39515903117 succeeded for `d1484682`.
+https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-10-21.html
+was opened in Chrome and the public 72.47-second MP4 played with readyState 4
+and no video error. The local playback also reached ended=true. The verified URL
+is now in plugin.json and the rebuilt public-author ZIP. The preceding Pages
+run 39515852460 was skipped because publish_public defaults false; the succeeding
+explicit public run above is the deployment receipt.
