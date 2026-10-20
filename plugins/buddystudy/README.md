@@ -89,3 +89,26 @@ GitHub Actions must not add runtime smoke or health gates. No production SSH.
 Official references:
 - https://developers.openai.com/plugins/build/auth
 - https://developers.openai.com/plugins/build/plugins
+
+## Public review preparation
+
+The publication ZIP includes five positive and three negative review scenarios,
+listing metadata, public support/privacy/terms URLs, and the remote OAuth MCP
+configuration. It contains no reviewer credentials.
+
+The publisher completed identity submission on 2026-10-21. The OpenAI organization
+settings currently show **Identity in review**; the plugin portal still refuses
+draft creation until the publisher identity is verified. Do not start another
+Persona inquiry while the submitted one is being reviewed.
+
+After approval, upload the ZIP at `https://platform.openai.com/plugins`, then use
+the actual domain verification token returned by the portal. Do not invent a
+plugin ID or a verification token. Before requesting review, run all packaged
+scenarios using an isolated sample-data account, record the live walkthrough,
+and enter reviewer credentials in the secure portal. OpenAI requires reviewer
+access that does not depend on interactive email codes or MFA; the current OAuth
+email-code login requires a supported reviewer-access path before submission.
+The existing app email/password login may provide the credential-verification
+boundary for that path, but no reviewer bypass or static verification code has
+been introduced. Policy attestations must be reviewed at the actual submission
+step. A prepared ZIP is not a submitted or published plugin.
