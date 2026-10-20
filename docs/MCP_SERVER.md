@@ -833,3 +833,39 @@ selections fail, and an exact replay cannot duplicate accepted entries. The form
 starts unchecked, links each current document and separates legal acceptance
 from ChatGPT OAuth consent. Normal connection management and revocation remain
 available without agreement; “Review required terms” is an explicit action.
+
+## Browser terms deployment and acceptance receipt (2026-10-21)
+
+Commit `447e5a65` passed 33 OAuth application/infra tests and the JVM bootJar/AOT build.
+Backend image workflow [39513962237](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/39513962237)
+and deploy-only workflow [39514686152](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/39514686152)
+both completed successfully. Live connect.js and connect.css bytes matched the committed source.
+
+After explicit owner approval, Chrome authenticated the existing tester and accepted
+only required TERMS_OF_SERVICE `2026-07-30` and PRIVACY_POLICY `2026-08-14` through
+the new canonical browser flow. A fresh pending check displayed that all required
+terms were agreed. Local evidence: `/tmp/buddystudy-live-terms-accepted.png`.
+The previous TERMS_AGREEMENT_REQUIRED blocker is resolved.
+
+The same real ChatGPT conversation then created root study 169 (ChatGPT 연결 검증
+20261021, level 2) and child topic 170 (SQL 인덱스), followed by exactly one
+completed question/record 192 under topic 170. It retrieved the saved question
+and hint while the record was UNGRADED. These are live successes; remaining
+answer/grade/delete cases and public review are tracked separately.
+
+Live answer verification: ChatGPT submitted the supplied Korean answer to record
+192 without rewriting it, polled grading to completion, and then independently
+re-read the saved answer and 99/CORRECT score. Topic statistics reported one
+answer, average/high score 99 and correct rate 100%. A requested follow-up
+completed as record 193 with parent 192, and its real question text was returned.
+Local grade evidence: `/tmp/buddystudy-live-grade-completed.png`. Deletion is
+waiting for action-time confirmation of exact record 192.
+
+Follow-up record 193 also accepted the supplied exact English answer and completed
+grading at 100/CORRECT. A combined unsupported API-key/resume/other-account
+request was refused without exposing those data. This checks the user-visible
+boundary, not a second-account isolation test. The actual development-host
+recording is `docs/assets/chatgpt-demo-2026-10-21.mp4` (72 seconds); it contains
+only synthetic learning data and hides unrelated chat titles. Playback was
+verified in Chrome. It demonstrates read/statistics, answer submission/grading
+and refusal; it does not yet demonstrate deletion.
