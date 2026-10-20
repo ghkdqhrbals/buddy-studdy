@@ -680,3 +680,12 @@ revoke/empty states at desktop and 390×844 mobile width. No console errors or
 layout overflow were observed. Screenshots were compared with the design concept;
 monochrome colors, removed mark and simpler copy follow the user's later direction.
 Production deployment and live OAuth/SMTP verification remain separate.
+
+Consent disclosure correction (2026-10-21): retained the monochrome layout and
+restored full visible explanations before the consent actions: shared and excluded
+information, read-only limitations, private content, transmission to OpenAI and
+account data settings, maximum 30-day authorization, optional consent, revocation
+and previously shared conversation content. No accordion hides these disclosures.
+KO/EN local-fixture browser QA passed at desktop and 390×844 mobile width with no
+console errors. Script syntax, whitespace checks and `:tutor:bootJar` passed.
+This check used mocked authentication, not live email or ChatGPT authorization.

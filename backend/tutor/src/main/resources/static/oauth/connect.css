@@ -41,9 +41,7 @@ h2 { font-size: 14px; font-weight: 650; margin: 0 0 6px; }
 .permissions li { padding: 17px 0; border-bottom: 1px solid var(--line); }
 .permissions strong { display: block; font-size: 16px; font-weight: 550; line-height: 1.4; }
 .permissions span { display: block; font-size: 13px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
-.scope-note { color: var(--muted); font-size: 13px; margin: 20px 0 28px; }
 .actions { display: grid; grid-template-columns: 1fr 2.4fr; gap: 10px; }
-.disclosure { color: #737373; font-size: 11px; line-height: 1.7; text-align: center; margin: 25px 0 0; }
 footer { display: flex; justify-content: center; flex-wrap: wrap; gap: 9px; margin-top: 10px; font-size: 12px; line-height: 1.8; color: #808080; }
 footer a { color: #737373; text-underline-offset: 3px; }
 #login:not([hidden]) ~ footer, #connections:not([hidden]) ~ footer { margin-top: 30px; }
@@ -55,3 +53,9 @@ footer a { color: #737373; text-underline-offset: 3px; }
 [hidden] { display: none !important; }
 @media (max-width: 360px) { .page { padding-inline: 20px; } main { padding-top: 45px; } h1 { font-size: 25px; } .account { font-size: 13px; } }
 @media (min-width: 700px) { .page { padding-top: 40px; } main { padding-top: 76px; } }
+.consent-details { margin: 28px 0; }
+.consent-details h2 { margin: 26px 0 9px; font-size: 15px; }
+.consent-details p { color: #525252; font-size: 14px; line-height: 1.8; margin: 0 0 12px; word-break: keep-all; overflow-wrap: anywhere; }
+.detail-link { color: #525252; font-size: 13px; text-underline-offset: 3px; line-height: 1.7; }
+.consent-details .optional-notice { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+#consent:not([hidden]) ~ footer { margin-top: 24px; }
