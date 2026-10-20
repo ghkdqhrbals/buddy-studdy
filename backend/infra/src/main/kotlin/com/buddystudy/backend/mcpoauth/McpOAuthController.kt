@@ -18,6 +18,7 @@ import kotlinx.coroutines.reactor.awaitSingle
 
 interface McpOAuthWebPort {
     suspend fun start(parameters: Map<String, String>, remoteAddress: String): McpOAuthStart
+    suspend fun restart(id: String, secret: String, remoteAddress: String): McpOAuthStart
     suspend fun manage(remoteAddress: String): McpOAuthStart
     suspend fun browserConnections(id: String, secret: String): List<McpOAuthConnection>
     suspend fun browserDisconnect(id: String, secret: String, connectionId: String)
@@ -35,6 +36,7 @@ class McpOAuthWebAdapter(private val oauth: McpOAuthUseCase) : McpOAuthWebPort {
         parameters["client_id"].orEmpty(), parameters["redirect_uri"].orEmpty(), parameters["state"].orEmpty(),
         parameters["code_challenge"].orEmpty(), parameters["resource"].orEmpty(), parameters["scope"].orEmpty(),
         parameters["response_type"].orEmpty(), parameters["code_challenge_method"].orEmpty(), remoteAddress))
+    override suspend fun restart(id: String, secret: String, remoteAddress: String) = oauth.restart(id, secret, remoteAddress)
     override suspend fun manage(remoteAddress: String) = oauth.startManagement(remoteAddress)
     override suspend fun browserConnections(id: String, secret: String) = oauth.browserConnections(id, secret)
     override suspend fun browserDisconnect(id: String, secret: String, connectionId: String) = oauth.browserDisconnect(id, secret, connectionId)
@@ -90,6 +92,14 @@ class McpOAuthController(
     suspend fun browserDisconnect(@RequestBody body: BrowserInput, exchange: ServerWebExchange): Map<String, Boolean> {
         oauth.browserDisconnect(body.id, browserSecret(body.id, exchange), body.connectionId)
         return mapOf("disconnected" to true)
+    }
+
+    @PostMapping("/oauth/restart")
+    suspend fun restart(@RequestBody body: BrowserInput, exchange: ServerWebExchange): Map<String, String> {
+        val start = oauth.restart(body.id, browserSecret(body.id, exchange), remote(exchange))
+        setBrowserCookie(start, exchange)
+        val mode = if (start.managementOnly) "&manage=1" else ""
+        return mapOf("redirect" to "/oauth/connect.html?id=${start.id}$mode")
     }
 
     @PostMapping("/oauth/email-code")

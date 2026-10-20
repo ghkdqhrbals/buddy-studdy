@@ -49,6 +49,17 @@ class McpOAuthService(
     }
 
     @Transactional
+    override suspend fun restart(id: String, browserSecret: String, remoteAddress: String): McpOAuthStart {
+        val grant = browserGrant(id, browserSecret)
+        val next = if (grant.managementOnly) startManagement(remoteAddress) else start(McpOAuthRequest(
+            grant.clientId, grant.redirectUri, grant.state, grant.challenge, grant.resource, grant.scope,
+            "code", "S256", remoteAddress))
+        // Switching the pending identity must not revoke an already established connection.
+        if (grant.accessHash == null) store.save(grant.copy(revoked = true))
+        return next.copy(managementOnly = grant.managementOnly)
+    }
+
+    @Transactional
     override suspend fun startManagement(remoteAddress: String): McpOAuthStart {
         val start = start(McpOAuthRequest(clientId, redirectUris.first(), secret(), challenge(secret()),
             resource, "learning:read", "code", "S256", remoteAddress))

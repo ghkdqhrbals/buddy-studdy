@@ -163,6 +163,21 @@ class McpOAuthServiceTest {
         assertThat(tokens.expires_in).isLessThanOrEqualTo(900)
     }
 
+    @Test
+    fun `changing account creates a fresh login without inheriting the verified identity`(): Unit = runBlocking {
+        val first = service.start(request())
+        service.sendCode(first.id, first.browserSecret, "user@example.com", "ip")
+        service.verifyCode(first.id, first.browserSecret, sentCode)
+        val next = service.restart(first.id, first.browserSecret, "ip")
+        assertThat(next.id).isNotEqualTo(first.id)
+        assertThat(store.rows[next.id]!!.verified).isFalse()
+        assertThat(store.rows[next.id]!!.userId).isNull()
+        assertThat(store.rows[first.id]!!.revoked).isTrue()
+        assertThat(store.rows[next.id]!!.challenge).isEqualTo(request().challenge)
+        assertThat(store.rows[next.id]!!.state).isEqualTo(request().state)
+        assertThat(runCatching { service.consent(next.id, next.browserSecret, true) }.isFailure).isTrue()
+    }
+
     private suspend fun authorize(): Pair<McpOAuthStart, String> {
         val start = service.start(request())
         service.sendCode(start.id, start.browserSecret, "user@example.com", "ip")

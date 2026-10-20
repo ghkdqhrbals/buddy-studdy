@@ -34,7 +34,7 @@ data class McpOAuthRequest(
     val challenge: String, val resource: String, val scope: String,
     val responseType: String, val challengeMethod: String, val remoteAddress: String = "unknown",
 )
-data class McpOAuthStart(val id: String, val browserSecret: String)
+data class McpOAuthStart(val id: String, val browserSecret: String, val managementOnly: Boolean = false)
 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
 data class McpOAuthTokens(
     val access_token: String, val refresh_token: String?,
@@ -46,6 +46,7 @@ data class McpOAuthConnection(val id: String, val clientId: String, val expiresA
 
 interface McpOAuthUseCase {
     suspend fun start(request: McpOAuthRequest): McpOAuthStart
+    suspend fun restart(id: String, browserSecret: String, remoteAddress: String): McpOAuthStart
     suspend fun startManagement(remoteAddress: String): McpOAuthStart
     suspend fun browserConnections(id: String, browserSecret: String): List<McpOAuthConnection>
     suspend fun browserDisconnect(id: String, browserSecret: String, connectionId: String)

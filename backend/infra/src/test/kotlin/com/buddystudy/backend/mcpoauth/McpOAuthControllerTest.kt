@@ -81,6 +81,17 @@ class McpOAuthControllerTest {
     }
 
     @Test
+    fun `account switch replaces the browser request cookie`(): Unit = runBlocking {
+        val nextId = "y".repeat(43)
+        Mockito.`when`(port.restart(id, "secret", "unknown")).thenReturn(McpOAuthStart(nextId, "next-secret"))
+        client.post().uri("/oauth/restart").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id)).exchange().expectStatus().isOk
+            .expectHeader().valueMatches("Set-Cookie", ".*__Secure-bs-oauth-$nextId=next-secret.*Secure.*HttpOnly.*")
+            .expectBody().jsonPath("$.redirect").isEqualTo("/oauth/connect.html?id=$nextId")
+    }
+
+    @Test
     fun `authorization only uses server generated browser cookie and local login destination`(): Unit = runBlocking {
         val parameters = mapOf("client_id" to "client")
         Mockito.`when`(port.start(parameters, "unknown")).thenReturn(McpOAuthStart(id, "secret"))

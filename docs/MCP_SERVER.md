@@ -660,3 +660,23 @@ requires a running Docker daemon.
   were not completed; targeted tutor tests excluded `:tutor:processTestAot`.
 - Not verified live: SMTP/Apple relay delivery, production deployment,
   ChatGPT registration/callback/refresh, and public directory acceptance.
+
+
+### Consent screen revision, 2026-10-21
+
+The browser flow now separates email login, code verification, consent and
+connection management. Consent uses a white/black/gray palette, short Korean
+labels without middle-dot separators, one account row, three disclosure rows,
+and paired cancel/allow actions. Existing connections are fetched only in
+management mode, never as a prerequisite for consent. A browser-cookie/Origin-
+protected `/oauth/restart` creates a fresh unverified grant for account switching,
+preserves the registered callback/PKCE/state, and invalidates the old pending grant.
+It does not revoke a previously established connection.
+
+Verification: OAuth application tests (12) and controller tests (8) passed;
+`:tutor:bootJar`, script syntax and whitespace checks passed. CUA/IAB local-fixture
+QA covered login/code/consent, account switch, KO/EN, management separation and
+revoke/empty states at desktop and 390×844 mobile width. No console errors or
+layout overflow were observed. Screenshots were compared with the design concept;
+monochrome colors, removed mark and simpler copy follow the user's later direction.
+Production deployment and live OAuth/SMTP verification remain separate.
