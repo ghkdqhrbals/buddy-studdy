@@ -97,8 +97,7 @@ form offers the verified identity **GYUMIN HWANGBO**. The 0.2.0 package targets
 **KR, US and JP**, as selected by the owner.
 
 The learning backend rollout and real ChatGPT tester email authentication passed.
-The actual consent page is awaiting action-time permission approval; authenticated
-ChatGPT tool cases are **Not run**. No public draft has been uploaded or submitted.
+The owner approved and completed the actual ChatGPT connection. A live read returned zero studies; root/topic creation was **Blocked** by `403 TERMS_AGREEMENT_REQUIRED` on the existing tester account. Remaining write cases, demo and public submission await authorized latest-terms acceptance in the normal account flow. No public draft has been uploaded or submitted.
 Existing EMAIL-provider password login supports reviewer access without OTP;
 credentials must remain outside this package and use the existing test account.
 

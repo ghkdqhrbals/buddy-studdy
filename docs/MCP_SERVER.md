@@ -791,3 +791,28 @@ action-time confirmation. No tool-call success or public submission is claimed.
 The existing tester is reused; credentials are excluded from the package.
 Reviewer-login follow-up `040ce115` is tracked separately in backend run
 `39511124479` and Pages run `39511128060`; both completed successfully. The deploy repository backend run `39511886619` also succeeded. Live connect.html and connect.js match `040ce115` exactly, and public metadata continues to advertise management scopes. Actual ChatGPT tool calls, video and public submission remain pending the connection approval.
+
+## Approved live ChatGPT connection checkpoint (2026-10-21)
+
+The owner explicitly approved the tester connection. Chrome completed consent
+and returned to ChatGPT; the installed private development plugin is
+`plugin_asdk_app_6ad7f06754188191aeff97c815be527e`. This is a development
+installation, not the public submission binding.
+
+Live test conversation:
+https://chatgpt.com/c/6ad7f34e-1614-83e8-ae09-56e4f06a07a8
+
+GPT-6 responses failed to render (`This response could not be loaded`, React
+418 in the browser console). The available GPT-5.6 Sol model rendered the live
+read response: zero saved studies. A subsequent explicit root/topic creation
+attempt returned `403 TERMS_AGREEMENT_REQUIRED` requiring latest account terms;
+ChatGPT reported no study/topic created and no IDs. No further creation retries,
+question generation, answer submission, grading or deletion were attempted.
+Do not treat account-policy refusal as successful CRUD verification or bypass it.
+
+Evidence: `/tmp/buddystudy-chatgpt-connected.png` and
+`/tmp/buddystudy-live-terms-required.png` (local artifacts only).
+Remaining dependency: authorized acceptance of the existing tester account's
+latest required app terms through the normal account flow, followed by remaining
+live cases, verified demo and submission setup. The granted MCP learning scopes
+do not include accepting account terms. No public draft or review was submitted.
