@@ -25,6 +25,33 @@ class McpOAuthServiceTest {
         "$issuer/api/v1/mcp", "learning:read offline_access", "code", "S256")
 
     @Test
+    fun `password login verifies an existing active email identity but never bypasses consent`(): Unit = runBlocking {
+        val start = service.start(request())
+        assertThat(runCatching { service.passwordLogin(start.id, "wrong", "user@example.com", "fixture-password", "ip") }.isFailure).isTrue()
+        assertThat(service.passwordLogin(start.id, start.browserSecret, "user@example.com", "wrong", "ip")).isFalse()
+        assertThat(runCatching { service.consent(start.id, start.browserSecret, true) }.isFailure).isTrue()
+        assertThat(service.passwordLogin(start.id, start.browserSecret, "USER@example.com", "fixture-password", "ip")).isTrue()
+        assertThat(store.rows[start.id]!!.accessHash).isNull()
+        assertThat(service.passwordLogin(start.id, start.browserSecret, "user@example.com", "fixture-password", "ip")).isFalse()
+        val code = query(service.consent(start.id, start.browserSecret, true))["code"]!!
+        assertThat(service.authenticate(service.token(exchange(code)).tokens!!.access_token)!!.userId).isEqualTo(7)
+        assertThat(sends).isZero()
+    }
+
+    @Test
+    fun `password login cannot create unknown identities exceed attempt limits or authenticate inactive owners`(): Unit = runBlocking {
+        val start = service.start(request())
+        repeat(5) { assertThat(service.passwordLogin(start.id, start.browserSecret, "user@example.com", "wrong", "ip")).isFalse() }
+        assertThat(service.passwordLogin(start.id, start.browserSecret, "user@example.com", "fixture-password", "ip")).isFalse()
+        val inactive = service.start(request())
+        store.active = false
+        assertThat(service.passwordLogin(inactive.id, inactive.browserSecret, "user@example.com", "fixture-password", "ip")).isFalse()
+        store.active = true; store.emailUser = null
+        assertThat(service.passwordLogin(inactive.id, inactive.browserSecret, "missing@example.com", "fixture-password", "ip")).isFalse()
+        assertThat(store.rows[inactive.id]!!.userId).isNull()
+    }
+
+    @Test
     fun `management consent grants exact requested scopes and refresh cannot widen old consent`(): Unit = runBlocking {
         val scopes = "learning:read learning:write learning:delete offline_access"
         val start = service.start(request().copy(scope = scopes))
@@ -215,6 +242,7 @@ class McpOAuthServiceTest {
         override suspend fun find(id: String, lock: Boolean) = rows[id]
         override suspend fun save(grant: McpOAuthGrant) { rows[grant.id] = grant }
         override suspend fun uniqueUserByEmail(email: String) = emailUser
+        override suspend fun emailCredential(email: String) = if (emailUser != null) McpEmailCredential(emailUser!!, com.buddystudy.backend.auth.sha256("fixture-password")) else null
         override suspend fun activeUser(userId: Long) = active
         override suspend fun list(userId: Long) = rows.values.filter { it.userId == userId }
         val used = mutableSetOf<Pair<String, String>>()

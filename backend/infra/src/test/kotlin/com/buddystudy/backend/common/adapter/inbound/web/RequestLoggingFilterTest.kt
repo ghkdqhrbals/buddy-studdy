@@ -58,6 +58,16 @@ class RequestLoggingFilterTest {
     }
 
     @Test
+    fun `OAuth password login never logs credentials or account email`(output: CapturedOutput): Unit = runBlocking {
+        execute(MockServerHttpRequest.post("/oauth/password")
+            .contentType(MediaType.APPLICATION_JSON).body("""{"email":"private-login@example.com","password":"private-login-password"}""")) { current ->
+            writeJson(current, """{"verified":false}""")
+        }
+        assertThat(output.all).contains("oauth_request")
+        assertThat(output.all).doesNotContain("private-login@example.com", "private-login-password")
+    }
+
+    @Test
     fun `MCP metadata logging redacts authorization and cookie headers`(output: CapturedOutput): Unit = runBlocking {
         execute(MockServerHttpRequest.post("/api/v1/mcp").header("Authorization", "Bearer secret-mcp-token")
             .header("Cookie", "secret-mcp-cookie").body("{}")) { current -> writeJson(current, "{}") }

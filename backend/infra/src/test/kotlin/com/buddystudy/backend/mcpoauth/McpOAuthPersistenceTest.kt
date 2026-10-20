@@ -31,11 +31,13 @@ class McpOAuthPersistenceTest {
         val db = DatabaseClient.create(factory)
         val transaction = TransactionalOperator.create(R2dbcTransactionManager(factory))
         suspend fun sql(value: String) { db.sql(value).fetch().rowsUpdated().awaitSingle() }
-        sql("CREATE TABLE users(id BIGINT PRIMARY KEY, email VARCHAR(254), status VARCHAR(30), provider VARCHAR(30))")
-        sql("INSERT INTO users VALUES(7, 'user@example.com', 'ACTIVE', 'EMAIL')")
+        sql("CREATE TABLE users(id BIGINT PRIMARY KEY, email VARCHAR(254), status VARCHAR(30), provider VARCHAR(30), password_hash VARCHAR(64))")
+        sql("INSERT INTO users VALUES(7, 'user@example.com', 'ACTIVE', 'EMAIL', '${sha256("fixture-password")}')")
         sql("CREATE TABLE mcp_oauth_grants(id VARCHAR(43) PRIMARY KEY, user_id BIGINT, payload CLOB, connected BOOLEAN DEFAULT FALSE, expires_at TIMESTAMP WITH TIME ZONE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)")
         sql("CREATE TABLE mcp_oauth_used_refresh_tokens(token_hash VARCHAR(64) PRIMARY KEY, grant_id VARCHAR(43), FOREIGN KEY(grant_id) REFERENCES mcp_oauth_grants(id) ON DELETE CASCADE)")
         val persistence = McpOAuthPersistenceAdapter(db, JsonMapperProvider.mapper, Mockito.mock(ReactiveStringRedisTemplate::class.java))
+        assertThat(persistence.emailCredential("user@example.com")).isEqualTo(McpEmailCredential(7, sha256("fixture-password")))
+        assertThat(persistence.emailCredential("missing@example.com")).isNull()
         val store = object : McpOAuthStorePort by persistence {
             override suspend fun allowToken(idHash: String) = true
             override suspend fun allowEmail(emailHash: String, remoteHash: String) = true
@@ -82,8 +84,8 @@ class McpOAuthPersistenceTest {
     @Test
     fun `ambiguous provider emails and inactive accounts are rejected`(): Unit = runBlocking {
         val db = DatabaseClient.create(ConnectionFactories.get("r2dbc:h2:mem:///oauth_${UUID.randomUUID()};DB_CLOSE_DELAY=-1"))
-        db.sql("CREATE TABLE users(id BIGINT PRIMARY KEY, email VARCHAR(254), status VARCHAR(30), provider VARCHAR(30))").fetch().rowsUpdated().awaitSingle()
-        db.sql("INSERT INTO users VALUES(1, 'same@example.com', 'ACTIVE', 'GOOGLE'), (2, 'same@example.com', 'ACTIVE', 'EMAIL'), (3, 'old@example.com', 'WITHDRAWN', 'APPLE')").fetch().rowsUpdated().awaitSingle()
+        db.sql("CREATE TABLE users(id BIGINT PRIMARY KEY, email VARCHAR(254), status VARCHAR(30), provider VARCHAR(30), password_hash VARCHAR(64))").fetch().rowsUpdated().awaitSingle()
+        db.sql("INSERT INTO users(id,email,status,provider) VALUES(1, 'same@example.com', 'ACTIVE', 'GOOGLE'), (2, 'same@example.com', 'ACTIVE', 'EMAIL'), (3, 'old@example.com', 'WITHDRAWN', 'APPLE')").fetch().rowsUpdated().awaitSingle()
         val adapter = McpOAuthPersistenceAdapter(db, JsonMapperProvider.mapper, Mockito.mock(ReactiveStringRedisTemplate::class.java))
         assertThat(adapter.uniqueUserByEmail("same@example.com")).isNull()
         assertThat(adapter.uniqueUserByEmail("old@example.com")).isNull()

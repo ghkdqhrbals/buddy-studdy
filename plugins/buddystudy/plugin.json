@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Create studies, practice questions, submit answers, receive grades and manage your own BuddyStudy learning records in ChatGPT.",
   "author": {
-    "name": "BuddyStudy",
+    "name": "GYUMIN HWANGBO",
     "email": "ghkdqhrbals@gmail.com"
   },
   "homepage": "https://ghkdqhrbals.github.io/buddy-studdy/",
@@ -14,7 +14,7 @@
         "displayName": "BuddyStudy",
         "shortDescription": "Study and practice in ChatGPT",
         "longDescription": "Connect your BuddyStudy account to create studies and topics, request questions, submit your answers, receive saved grading feedback and review topic statistics. Delete selected studies or records only after confirmation. Uses the same account limits and learning records as the iOS app.",
-        "developerName": "BuddyStudy",
+        "developerName": "GYUMIN HWANGBO",
         "category": "Education & Research",
         "capabilities": [
           "Read",
@@ -99,7 +99,12 @@
             "subtitle": "ChatGPTで学習を続ける",
             "description": "学習テーマを作成し、質問への回答をBuddyStudyに提出して採点を受けられます。記録やテーマ別の統計を確認し、選択したテーマや記録は確認後に削除できます。"
           }
-        }
+        },
+        "countries": [
+          "KR",
+          "US",
+          "JP"
+        ]
       }
     }
   }

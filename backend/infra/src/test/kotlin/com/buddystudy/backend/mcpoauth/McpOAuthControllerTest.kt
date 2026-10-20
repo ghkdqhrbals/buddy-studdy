@@ -15,6 +15,20 @@ class McpOAuthControllerTest {
         .webFilter<WebTestClient.ControllerSpec>(McpOAuthSecurityFilter(true)).build()
 
     @Test
+    fun `password sign in requires same origin cookie and bounded credentials`(): Unit = runBlocking {
+        Mockito.`when`(port.passwordLogin(id, "secret", "user@example.com", "fixture-password", "unknown")).thenReturn(true)
+        client.post().uri("/oauth/password").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id, "email" to "user@example.com", "password" to "fixture-password"))
+            .exchange().expectStatus().isOk.expectBody().jsonPath("$.verified").isEqualTo(true)
+        client.post().uri("/oauth/password").header(HttpHeaders.ORIGIN, "https://evil.example").header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id, "email" to "user@example.com", "password" to "fixture-password"))
+            .exchange().expectStatus().isBadRequest
+        Mockito.verify(port, Mockito.times(1)).passwordLogin(id, "secret", "user@example.com", "fixture-password", "unknown")
+    }
+
+    @Test
     fun `scope display comes from the cookie bound server request`(): Unit = runBlocking {
         Mockito.`when`(port.browserScopes(id, "secret")).thenReturn(setOf("learning:read", "learning:write"))
         client.post().uri("/oauth/session").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")

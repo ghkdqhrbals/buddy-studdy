@@ -28,7 +28,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 ## Optional ChatGPT Account Connection
 
 Registered users can connect BuddyStudy to ChatGPT through a learning MCP plugin.
-The browser authenticates the existing account with an emailed one-time code,
+The browser authenticates the existing account with an emailed one-time code or the existing password for an email-registered account,
 then requests explicit learning-data disclosure consent. The connection exposes
 only the account's study tree, questions, answers, grading feedback and topic
 statistics; it excludes administrator data, API keys, resumes and private profile

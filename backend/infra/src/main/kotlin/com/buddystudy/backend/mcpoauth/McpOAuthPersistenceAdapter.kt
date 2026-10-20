@@ -38,6 +38,11 @@ class McpOAuthPersistenceAdapter(
             .bind("email", email).map { row, _ -> (row.get("id") as Number).toLong() }.all().collectList().awaitSingle()
         return ids.singleOrNull()
     }
+    override suspend fun emailCredential(email: String): McpEmailCredential? =
+        database.sql("SELECT id, password_hash FROM users WHERE LOWER(email) = :email AND status = 'ACTIVE' AND provider = 'EMAIL' AND password_hash IS NOT NULL LIMIT 2")
+            .bind("email", email).map { row, _ -> McpEmailCredential((row.get("id") as Number).toLong(), row.get("password_hash", String::class.java)!!) }
+            .all().collectList().awaitSingle().singleOrNull()
+
     override suspend fun activeUser(userId: Long): Boolean =
         database.sql("SELECT id FROM users WHERE id = :id AND status = 'ACTIVE' AND provider <> 'ANONYMOUS'")
             .bind("id", userId).map { _, _ -> true }.one().awaitSingleOrNull() == true

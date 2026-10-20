@@ -817,7 +817,7 @@ The optional ChatGPT plugin reuses the stateless `/api/v1/mcp` transport and own
 learning use cases. OAuth discovery and `/oauth/*` browser/token endpoints belong
 to the same backend deployment. A provided public client uses authorization code
 with S256 PKCE, exact callback matching, resource binding and issuer identification.
-An existing account is authenticated with an emailed code; no app device session,
+An existing account is authenticated with an emailed code or its existing EMAIL-provider password; password sign-in uses constant-time hash comparison, bounded attempts and email/network rate limits. No app device session,
 account creation or identity merging occurs. HttpOnly Secure browser cookies,
 strict Origin/custom-header checks, CSP and explicit disclosure consent protect
 the browser flow. Tokens never appear in browser storage or OAuth logs.

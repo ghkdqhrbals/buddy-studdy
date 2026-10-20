@@ -16,7 +16,9 @@
 <label for="email" data-ko="계정 이메일" data-en="Account email">계정 이메일</label>
 <input id="email" type="email" autocomplete="email" maxlength="254" placeholder="name@example.com" required>
 <p class="hint" data-ko="BuddyStudy 프로필에 표시된 이메일을 사용하세요." data-en="Use the email shown in your BuddyStudy profile.">BuddyStudy 프로필에 표시된 이메일을 사용하세요.</p>
+<div id="password-fields" hidden><label for="password" data-ko="비밀번호" data-en="Password">비밀번호</label><input id="password" type="password" autocomplete="current-password" maxlength="256"><p class="hint" data-ko="이메일로 가입한 계정만 사용할 수 있습니다." data-en="For accounts registered with email and password.">이메일로 가입한 계정만 사용할 수 있습니다.</p></div>
 <button class="primary" type="submit" data-ko="계속" data-en="Continue">계속</button>
+<button id="login-method" class="text-button back" type="button">비밀번호로 로그인</button>
 </form>
 <form id="code-form" hidden>
 <label for="code" data-ko="8자리 인증번호" data-en="8-digit verification code">8자리 인증번호</label>

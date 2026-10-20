@@ -86,6 +86,21 @@ class McpOAuthService(
     override suspend fun cleanup(): Long = store.purgeExpired()
 
     @Transactional
+    override suspend fun passwordLogin(id: String, browserSecret: String, email: String, password: String, remoteAddress: String): Boolean {
+        val grant = browserGrant(id, browserSecret)
+        if (grant.verified || grant.codeHash != null || grant.accessHash != null || grant.emailAttempts >= 5) return false
+        val normalized = email.trim().lowercase()
+        require(normalized.length in 3..254 && password.length in 1..256) { "invalid_request" }
+        if (!store.allowEmail(sha256(normalized), sha256(remoteAddress))) return false
+        val credential = store.emailCredential(normalized)
+        val passwordMatches = equal(credential?.passwordHash ?: "0".repeat(64), sha256(password))
+        val valid = credential != null && passwordMatches && store.activeUser(credential.userId)
+        store.save(grant.copy(userId = if (valid) credential?.userId else null,
+            verified = valid, emailAttempts = grant.emailAttempts + 1, emailCodeHash = null))
+        return valid
+    }
+
+    @Transactional
     override suspend fun sendCode(id: String, browserSecret: String, email: String, remoteAddress: String): Boolean {
         val grant = browserGrant(id, browserSecret)
         require(grant.codeHash == null && grant.accessHash == null && !grant.verified) { "invalid_request" }

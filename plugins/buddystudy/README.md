@@ -63,7 +63,7 @@ for ChatGPT; local Codex callbacks are not enabled by this configuration.
 ## End-user flow
 
 1. Connect BuddyStudy in ChatGPT.
-2. Enter the email shown in BuddyStudy's app profile and the emailed 8-digit code.
+2. Enter the email shown in BuddyStudy's app profile and the emailed 8-digit code, or use the existing password for an email-registered account.
 3. Review and allow the requested learning read, write and deletion permissions to ChatGPT.
 4. Ask “Show my recent learning records” or “Which topics should I review?”
 5. Manage or revoke connections at `https://api.ghkdqhrbals.org/oauth/manage`.

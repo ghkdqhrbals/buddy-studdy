@@ -768,3 +768,13 @@ Record deletion requires `confirm=true`; study deletion keeps its subtree fence.
 Private profile, credentials and administrator operations remain unavailable.
 
 Verification: 108 targeted application/infra/tutor tests passed, including consent scope issuance, refresh escalation rejection, write/delete isolation, canonical confirmed record deletion, protected session display and MCP catalog/schema hints. Application AOT and `:tutor:bootJar` passed. Chrome local-fixture login and management-consent rendering passed; screenshot `/tmp/buddystudy-management-consent.png` is local evidence only. Actual ChatGPT tool calls and public review remain unverified until completed.
+
+Reviewer access follow-up: existing EMAIL-provider accounts may use their current
+password without email OTP. No reviewer bypass, signup, password reset or account
+linking is introduced. Active identity lookup, constant-time hash comparison,
+five grant attempts and shared email/network rate limits apply. Passwords never
+enter grant payloads or OAuth logs and are cleared from the form after submission.
+OAuth application tests (15), controller tests (10), persistence tests (2),
+request-logging tests (19), MCP host tests (18), AOT and bootJar passed. Chrome
+local-fixture password login reached scoped consent; this is not a live login.
+Publication targets KR/US/JP and uses verified identity GYUMIN HWANGBO.

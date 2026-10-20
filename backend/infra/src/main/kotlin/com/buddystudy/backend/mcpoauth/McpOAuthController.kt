@@ -17,6 +17,7 @@ import java.time.Duration
 import kotlinx.coroutines.reactor.awaitSingle
 
 interface McpOAuthWebPort {
+    suspend fun passwordLogin(id: String, secret: String, email: String, password: String, remoteAddress: String): Boolean
     suspend fun start(parameters: Map<String, String>, remoteAddress: String): McpOAuthStart
     suspend fun restart(id: String, secret: String, remoteAddress: String): McpOAuthStart
     suspend fun manage(remoteAddress: String): McpOAuthStart
@@ -33,6 +34,7 @@ interface McpOAuthWebPort {
 }
 @Component
 class McpOAuthWebAdapter(private val oauth: McpOAuthUseCase) : McpOAuthWebPort {
+    override suspend fun passwordLogin(id: String, secret: String, email: String, password: String, remoteAddress: String) = oauth.passwordLogin(id, secret, email, password, remoteAddress)
     override suspend fun start(parameters: Map<String, String>, remoteAddress: String) = oauth.start(McpOAuthRequest(
         parameters["client_id"].orEmpty(), parameters["redirect_uri"].orEmpty(), parameters["state"].orEmpty(),
         parameters["code_challenge"].orEmpty(), parameters["resource"].orEmpty(), parameters["scope"].orEmpty(),
@@ -114,6 +116,12 @@ class McpOAuthController(
         require(body.email.length <= 254)
         return mapOf("sent" to oauth.sendCode(body.id, secret, body.email, remote(exchange)))
     }
+    @PostMapping("/oauth/password")
+    suspend fun password(@RequestBody body: BrowserInput, exchange: ServerWebExchange): Map<String, Boolean> {
+        val secret = browserSecret(body.id, exchange)
+        require(body.email.length <= 254 && body.password.length in 1..256)
+        return mapOf("verified" to oauth.passwordLogin(body.id, secret, body.email, body.password, remote(exchange)))
+    }
     @PostMapping("/oauth/verify")
     suspend fun verify(@RequestBody body: BrowserInput, exchange: ServerWebExchange): Map<String, Boolean> =
         mapOf("verified" to oauth.verify(body.id, browserSecret(body.id, exchange), body.code))
@@ -165,5 +173,5 @@ class McpOAuthController(
         return exchange.request.remoteAddress?.address?.hostAddress ?: "unknown"
     }
     private fun cookieName(id: String) = "__Secure-bs-oauth-$id"
-    data class BrowserInput(var id: String = "", var email: String = "", var code: String = "", var allow: Boolean = false, var connectionId: String = "")
+    data class BrowserInput(var id: String = "", var email: String = "", var password: String = "", var code: String = "", var allow: Boolean = false, var connectionId: String = "")
 }

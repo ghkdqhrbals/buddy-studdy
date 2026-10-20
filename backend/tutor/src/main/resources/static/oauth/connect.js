@@ -3,6 +3,7 @@ const id = new URLSearchParams(location.search).get('id');
 const manage = new URLSearchParams(location.search).get('manage') === '1';
 let language = navigator.language.startsWith('ko') ? 'ko' : 'en';
 let stage = 'email';
+let passwordMode = false;
 let activeConnections = null;
 let grantedScopes = new Set();
 const message = document.getElementById('message');
@@ -15,6 +16,7 @@ function translate() {
   document.getElementById('privacy').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}privacy.html`;
   document.querySelectorAll('[data-ko]').forEach(node => { node.textContent = node.dataset[language]; });
   document.querySelectorAll('[data-scope]').forEach(node => { node.hidden = !grantedScopes.has(node.dataset.scope); });
+  document.getElementById('login-method').textContent = passwordMode ? text('인증번호로 로그인', 'Sign in with a code') : text('비밀번호로 로그인', 'Sign in with a password');
   document.getElementById('language').textContent = language === 'ko' ? 'English' : '한국어';
   const titles = {
     email: text(manage ? '연결 관리 로그인' : 'BuddyStudy 로그인', manage ? 'Manage connections' : 'Sign in to BuddyStudy'),
@@ -58,9 +60,32 @@ async function busy(action) {
   try { await action(); } catch (error) { message.textContent = error.message; }
   finally { document.querySelectorAll('button').forEach(button => { button.disabled = false; }); }
 }
+document.getElementById('login-method').addEventListener('click', () => {
+  passwordMode = !passwordMode;
+  document.getElementById('password-fields').hidden = !passwordMode;
+  document.getElementById('password').required = passwordMode;
+  document.getElementById('password').value = '';
+  translate();
+});
+async function signedIn() {
+  document.getElementById('password').value = '';
+  const session = await request('/oauth/session', {});
+  grantedScopes = new Set(session.scopes);
+  document.getElementById('account-email').textContent = emailInput.value.trim().toLowerCase();
+  setStage(manage ? 'connections' : 'consent');
+  if (manage) await showConnections();
+}
 document.getElementById('email-form').addEventListener('submit', event => {
   event.preventDefault();
   busy(async () => {
+    if (passwordMode) {
+      const password = document.getElementById('password').value;
+      document.getElementById('password').value = '';
+      const result = await request('/oauth/password', {email: emailInput.value, password});
+      if (!result.verified) throw new Error(text('이메일과 비밀번호를 확인해 주세요.', 'Check your email and password.'));
+      await signedIn();
+      return;
+    }
     const result = await request('/oauth/email-code', {email: emailInput.value});
     if (!result.sent) throw new Error(text('요청이 많습니다. 잠시 후 다시 시도해 주세요.', 'Too many requests. Try again later.'));
     setStage('code');
@@ -77,11 +102,7 @@ document.getElementById('code-form').addEventListener('submit', event => {
   busy(async () => {
     const result = await request('/oauth/verify', {code: document.getElementById('code').value});
     if (!result.verified) throw new Error(text('인증번호를 확인해 주세요. 최대 5회까지 입력할 수 있습니다.', 'Check your code. A maximum of five attempts is allowed.'));
-    const session = await request('/oauth/session', {});
-    grantedScopes = new Set(session.scopes);
-    document.getElementById('account-email').textContent = emailInput.value.trim().toLowerCase();
-    setStage(manage ? 'connections' : 'consent');
-    if (manage) await showConnections();
+    await signedIn();
   });
 });
 document.getElementById('change-account').addEventListener('click', () => busy(async () => {
