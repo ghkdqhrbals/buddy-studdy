@@ -27,7 +27,9 @@
 </section>
 <section id="consent" aria-labelledby="screen-title" hidden>
 <div class="account"><span id="account-email"></span><button id="change-account" class="text-button" type="button" data-ko="계정 변경" data-en="Change account">계정 변경</button></div>
-<h2 data-ko="공유할 정보" data-en="Information you share">공유할 정보</h2>
+<div class="permission-card">
+<div class="permission-body">
+<h2 data-ko="ChatGPT에 허용할 권한" data-en="Allow ChatGPT to">ChatGPT에 허용할 권한</h2>
 <ul class="permissions">
 <li><strong data-ko="스터디" data-en="Studies and topics">스터디</strong><span data-ko="내가 저장한 스터디, 학습 주제와 트리" data-en="Your saved studies, topics and learning tree">내가 저장한 스터디, 학습 주제와 트리</span></li>
 <li><strong data-ko="학습 기록" data-en="Questions, answers and feedback">학습 기록</strong><span data-ko="질문과 힌트, 내 답변, 점수, 피드백과 해설" data-en="Questions, hints, your answers, scores, feedback and explanations">질문과 힌트, 내 답변, 점수, 피드백과 해설</span></li>
@@ -37,7 +39,9 @@
 <p data-ko="ChatGPT가 내 스터디와 학습 기록을 조회할 수 있습니다. 기록을 수정하거나 삭제할 수는 없습니다." data-en="ChatGPT can read your studies and learning records. It cannot edit or delete them.">ChatGPT가 내 스터디와 학습 기록을 조회할 수 있습니다. 기록을 수정하거나 삭제할 수는 없습니다.</p>
 <p data-ko="조회한 내용은 OpenAI로 전달됩니다. 연결은 최대 30일간 유지되며 언제든 해제할 수 있습니다." data-en="Retrieved content is shared with OpenAI. The connection lasts up to 30 days and you can disconnect anytime.">조회한 내용은 OpenAI로 전달됩니다. 연결은 최대 30일간 유지되며 언제든 해제할 수 있습니다.</p>
 </div>
+</div>
 <div class="actions"><button id="deny" class="secondary" type="button" data-ko="취소" data-en="Cancel">취소</button><button id="allow" class="primary" type="button" data-ko="연결 허용" data-en="Allow connection">연결 허용</button></div>
+</div>
 </section>
 <section id="connections" aria-labelledby="screen-title" hidden>
 <p class="hint" data-ko="연결을 해제하면 더 이상 내 기록을 조회할 수 없습니다. 이미 전달된 내용은 ChatGPT에서 별도로 관리하세요." data-en="Disconnecting stops future access. Manage content already shared with ChatGPT separately.">연결을 해제하면 더 이상 내 기록을 조회할 수 없습니다. 이미 전달된 내용은 ChatGPT에서 별도로 관리하세요.</p>

@@ -706,3 +706,10 @@ References: https://www.oauth.com/oauth2-servers/authorization/the-authorization
 and https://miro.medium.com/v2/resize%3Afit%3A1400/1%2AxbHVN3CVWVITnvSA_ZbD6w.png
 Verification: local-fixture desktop and 390×844 mobile screenshots checked;
 no console errors. Script syntax and whitespace checks passed.
+
+Consent card refinement (2026-10-21): retained a centered title/account and grouped
+left-aligned permissions in one bordered card, following the inspected GitHub
+authorization reference. Removed repeated row rules, reduced heading weight,
+and placed equal-width actions in the card footer. Kept scope and processing
+copy. Local-fixture desktop and 390×844 screenshots checked with no console
+errors; JavaScript syntax and whitespace checks passed.
