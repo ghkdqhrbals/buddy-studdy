@@ -536,7 +536,7 @@ explicit user confirmation
 | `MCP_SERVER_ENABLED` | `false` | Registers the MCP route and server; explicit opt-in is required in every profile |
 | `MCP_ALLOWED_HOSTS` | BuddyStudy production/dev hosts plus loopback | Comma-separated exact or wildcard-port Host allowlist |
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated browser Origin allowlist; empty rejects supplied origins |
-| `MCP_OAUTH_ENABLED` | `false` | Enables OAuth routes/discovery and switches MCP to dedicated read-only tokens |
+| `MCP_OAUTH_ENABLED` | `false` | Enables OAuth routes/discovery and switches MCP to dedicated learning-scoped tokens |
 | `MCP_OAUTH_TRUST_PROXY` | `false` | Trust gateway-overwritten `X-Real-IP` for rate limits; enable only with no direct backend exposure |
 | `MCP_OAUTH_ISSUER` | `https://api.ghkdqhrbals.org` | Canonical HTTPS origin; resource is the issuer plus `/api/v1/mcp` |
 | `MCP_OAUTH_CLIENT_ID` | `buddystudy-chatgpt` | Predefined public client ID, no client secret |
@@ -582,13 +582,13 @@ backend HTTPS origin.
 
 Before enabling production:
 
-1. For the read-only ChatGPT connection, publish the immutable KO/EN/JA
+1. For the ChatGPT learning connection, publish the immutable KO/EN/JA
    connected-learning disclosure and existing privacy policy. The browser records
    separate optional consent; it must not silently agree to required app terms.
 2. Register the provided public client and exact ChatGPT callback, then enable
    `MCP_OAUTH_ENABLED=true` with `MCP_SERVER_ENABLED=true`. Do not distribute
    normal app tokens to third-party hosts.
-3. Keep the legacy write-capable mode private. It additionally requires a full
+3. Keep the legacy profile-capable mode private. It additionally requires a full
    privacy-policy update covering optional resume/interests, required agreements,
    transaction-safe per-account write budgets and edge rate limits before any
    automated third-party write exposure.
@@ -750,3 +750,21 @@ requires the portal's vendor-aware validator (the portable schema rejects vendor
 extensions). Five positive and three negative scenarios are packaged, but a
 dedicated reviewer account, live scenario validation and demo video remain
 required before submission.
+
+
+## Learning management OAuth update (2026-10-21)
+
+OAuth learning tool catalog now contains 27 operations. Read, write and deletion
+scopes are enforced independently at every handler. Existing read grants remain
+read-only, including after refresh; expanded access requires fresh consent.
+The browser displays scopes from `/oauth/session` using the same protected cookie
+and origin checks, and links management consent to immutable KO/EN/JA
+`chatgpt-learning-management-2026-10-21.html` disclosures.
+
+Generation, answer submission and grading retain canonical use cases, quotas,
+process polling and idempotency. New follow-up, thread, custom-question and
+record-deletion tools reuse their existing app use cases and owner fences.
+Record deletion requires `confirm=true`; study deletion keeps its subtree fence.
+Private profile, credentials and administrator operations remain unavailable.
+
+Verification: 108 targeted application/infra/tutor tests passed, including consent scope issuance, refresh escalation rejection, write/delete isolation, canonical confirmed record deletion, protected session display and MCP catalog/schema hints. Application AOT and `:tutor:bootJar` passed. Chrome local-fixture login and management-consent rendering passed; screenshot `/tmp/buddystudy-management-consent.png` is local evidence only. Actual ChatGPT tool calls and public review remain unverified until completed.

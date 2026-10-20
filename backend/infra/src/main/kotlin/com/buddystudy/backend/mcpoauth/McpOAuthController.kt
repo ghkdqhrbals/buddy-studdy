@@ -20,6 +20,7 @@ interface McpOAuthWebPort {
     suspend fun start(parameters: Map<String, String>, remoteAddress: String): McpOAuthStart
     suspend fun restart(id: String, secret: String, remoteAddress: String): McpOAuthStart
     suspend fun manage(remoteAddress: String): McpOAuthStart
+    suspend fun browserScopes(id: String, secret: String): Set<String>
     suspend fun browserConnections(id: String, secret: String): List<McpOAuthConnection>
     suspend fun browserDisconnect(id: String, secret: String, connectionId: String)
     suspend fun sendCode(id: String, secret: String, email: String, remoteAddress: String): Boolean
@@ -38,6 +39,7 @@ class McpOAuthWebAdapter(private val oauth: McpOAuthUseCase) : McpOAuthWebPort {
         parameters["response_type"].orEmpty(), parameters["code_challenge_method"].orEmpty(), remoteAddress))
     override suspend fun restart(id: String, secret: String, remoteAddress: String) = oauth.restart(id, secret, remoteAddress)
     override suspend fun manage(remoteAddress: String) = oauth.startManagement(remoteAddress)
+    override suspend fun browserScopes(id: String, secret: String) = oauth.browserScopes(id, secret)
     override suspend fun browserConnections(id: String, secret: String) = oauth.browserConnections(id, secret)
     override suspend fun browserDisconnect(id: String, secret: String, connectionId: String) = oauth.browserDisconnect(id, secret, connectionId)
     override suspend fun sendCode(id: String, secret: String, email: String, remoteAddress: String) = oauth.sendCode(id, secret, email, remoteAddress)
@@ -59,7 +61,7 @@ class McpOAuthController(
     private val resource get() = "$issuer/api/v1/mcp"
     @GetMapping("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/v1/mcp")
     fun resourceMetadata() = mapOf("resource" to resource, "authorization_servers" to listOf(issuer),
-        "scopes_supported" to listOf("learning:read", "offline_access"), "bearer_methods_supported" to listOf("header"))
+        "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "offline_access"), "bearer_methods_supported" to listOf("header"))
 
     @GetMapping("/.well-known/oauth-authorization-server")
     fun authorizationMetadata() = mapOf(
@@ -69,7 +71,7 @@ class McpOAuthController(
         "token_endpoint_auth_methods_supported" to listOf("none"), "revocation_endpoint_auth_methods_supported" to listOf("none"),
         "code_challenge_methods_supported" to listOf("S256"),
         "authorization_response_iss_parameter_supported" to true,
-        "scopes_supported" to listOf("learning:read", "offline_access"))
+        "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "offline_access"))
 
     @GetMapping("/oauth/authorize")
     suspend fun authorize(@RequestParam parameters: MultiValueMap<String, String>, exchange: ServerWebExchange): ResponseEntity<Void> {
@@ -85,6 +87,10 @@ class McpOAuthController(
         setBrowserCookie(start, exchange)
         return ResponseEntity.status(HttpStatus.FOUND).location(URI("/oauth/connect.html?id=${start.id}&manage=1")).build()
     }
+    @PostMapping("/oauth/session")
+    suspend fun session(@RequestBody body: BrowserInput, exchange: ServerWebExchange) =
+        mapOf("scopes" to oauth.browserScopes(body.id, browserSecret(body.id, exchange)))
+
     @PostMapping("/oauth/connections")
     suspend fun browserConnections(@RequestBody body: BrowserInput, exchange: ServerWebExchange) =
         oauth.browserConnections(body.id, browserSecret(body.id, exchange))

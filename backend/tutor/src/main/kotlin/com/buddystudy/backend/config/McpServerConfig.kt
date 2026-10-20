@@ -95,7 +95,7 @@ class McpServerConfig(
                 .resources(false, false)
                 .build(),
         )
-        .tools(mcp.tools().filter { !oauthEnabled || it.tool().name() in BuddyStudyMcpAdapter.OAUTH_READ_TOOLS })
+        .tools(mcp.tools().filter { !oauthEnabled || it.tool().name() in BuddyStudyMcpAdapter.OAUTH_TOOL_SCOPES })
         .resources(mcp.resources().filter { !oauthEnabled || it.resource().uri() in BuddyStudyMcpAdapter.OAUTH_READ_RESOURCES })
         .build()
 
@@ -104,7 +104,7 @@ class McpServerConfig(
             BuddyStudy data is private to the authenticated account. Never request or infer a user ID.
             Preserve user-authored answers exactly. Root-study creation, child-topic creation, and question generation are separate operations.
             Question generation and answer grading are asynchronous: return the correlation ID and poll the matching process tool.
-            Delete a study subtree only after explicit user confirmation and pass confirm=true.
+            Delete a study subtree or learning record only after explicit user confirmation of the exact target and pass confirm=true. Existing read-only grants cannot write; reconnect and grant the requested scopes.
             Interpret scores topic by topic and with difficulty context; do not manufacture a global average across unrelated topics.
         """.trimIndent()
     }

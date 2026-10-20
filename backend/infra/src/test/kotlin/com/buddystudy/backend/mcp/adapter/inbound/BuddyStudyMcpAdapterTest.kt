@@ -71,7 +71,7 @@ class BuddyStudyMcpAdapterTest {
 
         assertThat(tools.map { it.tool().name() })
             .containsExactlyElementsOf(expected.map(ToolContract::name))
-        assertThat(tools).hasSize(25)
+        assertThat(tools).hasSize(29)
 
         tools.zip(expected).forEach { (specification, contract) ->
             val tool = specification.tool()
@@ -939,6 +939,33 @@ class BuddyStudyMcpAdapterTest {
     }
 
     @Test
+    fun `OAuth write and delete scopes are independent and never authorize private profile tools`() {
+        for ((scope, denied) in mapOf(
+            "learning:write" to listOf("delete_record", "delete_study", "get_my_context", "update_my_learning_context"),
+            "learning:delete" to listOf("create_root_study", "submit_answer", "request_follow_up", "get_my_context"),
+        )) {
+            var invoked = false
+            val instance = adapter(proxyUseCase { _, _ -> invoked = true; null })
+            val owner = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read", scope))
+            val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to owner))
+            denied.forEach { name -> assertThat(errorDetails(call(instance, name, emptyMap(), context))).containsEntry("status", 403) }
+            assertThat(invoked).isFalse()
+        }
+    }
+
+    @Test
+    fun `OAuth delete forwards the exact owner record and confirmation`() {
+        val owner = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read", "learning:delete"))
+        val instance = adapter(proxyUseCase { method, args ->
+            assertThat(method).isEqualTo("deleteRecord")
+            assertThat(args.take(3)).containsExactly(owner, 9L, true)
+            mapOf("deleted" to true, "recordId" to 9L)
+        })
+        val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to owner))
+        assertThat(call(instance, "delete_record", mapOf("record_id" to 9L, "confirm" to true), context).isError()).isFalse()
+    }
+
+    @Test
     fun `OAuth reads preserve the authenticated owner principal`() {
         val principal = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read"))
         val instance = adapter(proxyUseCase { method, arguments ->
@@ -1221,6 +1248,26 @@ class BuddyStudyMcpAdapterTest {
                 required = listOf("correlation_id"),
             ),
             readOnly = true,
+        ),
+        ToolContract(
+            name = "delete_record",
+            schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned learning record ID."), "confirm" to mapOf("type" to "boolean", "description" to "True only after explicit user confirmation.")), required = listOf("record_id", "confirm")),
+            readOnly = false, destructive = true, idempotent = false,
+        ),
+        ToolContract(
+            name = "request_follow_up",
+            schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned graded parent record ID."), "idempotency_key" to stringProperty("Stable request key reused on retry.", minLength = 1, maxLength = 100)), required = listOf("record_id", "idempotency_key")),
+            readOnly = false, idempotent = true, openWorld = true,
+        ),
+        ToolContract(
+            name = "get_question_thread",
+            schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned record ID."), "language" to languageProperty(), "view" to viewProperty()), required = listOf("record_id")),
+            readOnly = true,
+        ),
+        ToolContract(
+            name = "create_custom_question",
+            schema = objectSchema(properties = linkedMapOf("study_id" to idProperty("Owned study ID."), "idempotency_key" to stringProperty("Stable request key.", minLength = 1, maxLength = 100), "question" to stringProperty("User-authored question.", minLength = 1, maxLength = 4000), "answer" to stringProperty("User-authored answer.", minLength = 1, maxLength = 12000), "language" to languageProperty()), required = listOf("study_id", "idempotency_key", "question", "answer", "language")),
+            readOnly = false, idempotent = true,
         ),
         ToolContract(
             name = "list_records",

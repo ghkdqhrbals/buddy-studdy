@@ -1,15 +1,11 @@
 # BuddyStudy for ChatGPT
 
-End users connect their **own** BuddyStudy account and retrieve their study tree,
-questions, answers, grading feedback and topic-level statistics. This is not an
-administrator integration. No API key, device token or manual bearer copy is
-required. No content-creation, deletion, account administration, resume or private
-profile tools are exposed by the OAuth connection.
+End users connect their **own** BuddyStudy account to create studies and topics, request questions, submit answers for grading and manage learning records. Existing ownership checks and account quotas apply. Study/topic creation does not consume question quota. Deletion requires confirmation of the exact target. Account administration, API keys, resumes and private profile tools remain excluded.
 
 ## Backend configuration
 
 Deploy the migration and backend first through the existing Backend API workflow.
-Publish the KO/EN/JA `chatgpt-connection-2026-10-20.html` disclosures before enabling.
+Publish the KO/EN/JA `chatgpt-learning-management-2026-10-21.html` disclosures before enabling.
 
 ```dotenv
 MCP_SERVER_ENABLED=true
@@ -46,7 +42,7 @@ and workspace) with these values:
 | Client ID | `buddystudy-chatgpt` |
 | Token endpoint authentication | `none` (public client + PKCE S256) |
 | Client secret | None |
-| Scopes | `learning:read offline_access` |
+| Scopes | `learning:read learning:write learning:delete offline_access` |
 | Resource | `https://api.ghkdqhrbals.org/api/v1/mcp` |
 
 Discovery supplies `/oauth/authorize` and `/oauth/token`. The server advertises
@@ -68,7 +64,7 @@ for ChatGPT; local Codex callbacks are not enabled by this configuration.
 
 1. Connect BuddyStudy in ChatGPT.
 2. Enter the email shown in BuddyStudy's app profile and the emailed 8-digit code.
-3. Review and allow read-only disclosure of learning records to ChatGPT.
+3. Review and allow the requested learning read, write and deletion permissions to ChatGPT.
 4. Ask “Show my recent learning records” or “Which topics should I review?”
 5. Manage or revoke connections at `https://api.ghkdqhrbals.org/oauth/manage`.
 

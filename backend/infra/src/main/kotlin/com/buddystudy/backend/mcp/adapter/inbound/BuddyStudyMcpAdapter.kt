@@ -382,6 +382,30 @@ class BuddyStudyMcpAdapter(
                 )
             },
             tool(
+                name = "delete_record", title = "Delete a learning record",
+                description = "Permanently delete one owned question and its answer/feedback only after the user explicitly confirms the exact record. Read get_record first, then pass confirm=true. Deleting a study does not delete its saved records.",
+                schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned learning record ID."), "confirm" to mapOf("type" to "boolean", "description" to "True only after explicit user confirmation.")), required = listOf("record_id", "confirm")),
+                readOnly = false, destructive = true, idempotent = false,
+            ) { principal, args -> buddyStudy.deleteRecord(principal, args.long("record_id"), args.boolean("confirm")) },
+            tool(
+                name = "request_follow_up", title = "Request a follow-up question",
+                description = "Queue a follow-up to an owned graded question using the existing question quota. Reuse the same idempotency key on retries and poll get_question_process for the result.",
+                schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned graded parent record ID."), "idempotency_key" to stringProperty("Stable request key reused on retry.", minLength = 1, maxLength = 100)), required = listOf("record_id", "idempotency_key")),
+                readOnly = false, idempotent = true, openWorld = true,
+            ) { principal, args -> buddyStudy.requestFollowUp(principal, args.long("record_id"), args.string("idempotency_key")) },
+            tool(
+                name = "get_question_thread", title = "Read a question thread",
+                description = "Read the owned parent question and follow-up chain, including saved answers and grading feedback.",
+                schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned record ID."), "language" to languageProperty(), "view" to viewProperty()), required = listOf("record_id")),
+                readOnly = true,
+            ) { principal, args -> buddyStudy.getQuestionThread(principal, args.long("record_id"), args.optionalString("language") ?: "ko", args.optionalString("view") ?: "localized") },
+            tool(
+                name = "create_custom_question", title = "Save a custom question and answer",
+                description = "Save the user's own question and answer in an owned study without AI generation or grading. This creates an ungraded custom record; do not present it as an AI-graded result.",
+                schema = objectSchema(properties = linkedMapOf("study_id" to idProperty("Owned study ID."), "idempotency_key" to stringProperty("Stable request key.", minLength = 1, maxLength = 100), "question" to stringProperty("User-authored question.", minLength = 1, maxLength = 4000), "answer" to stringProperty("User-authored answer.", minLength = 1, maxLength = 12000), "language" to languageProperty()), required = listOf("study_id", "idempotency_key", "question", "answer", "language")),
+                readOnly = false, idempotent = true,
+            ) { principal, args -> buddyStudy.createCustomQuestion(principal, args.long("study_id"), args.string("idempotency_key"), args.string("question"), args.string("answer"), args.string("language")) },
+            tool(
                 name = "list_records",
                 title = "List study records",
                 description = "Return a bounded page of completed study records. recordType distinguishes QUESTION from VOICE_TUTOR; both use the same canonical record ID as the Records tab and public comments. QUESTION may include gradingResult. VOICE_TUTOR uses voiceRecord for the optional spoken score and learning feedback, never a fabricated grading result. Reading history is not a new answer or permission to act.",
@@ -630,8 +654,8 @@ class BuddyStudyMcpAdapter(
             val operation = mono {
                 val current = principal(context)
                 val scopes = current.oauthScopes
-                if (scopes != null && ("learning:read" !in scopes || name !in OAUTH_READ_TOOLS))
-                    throw AccessDeniedException("OAuth connection is read only.")
+                if (scopes != null && OAUTH_TOOL_SCOPES[name]?.let { it in scopes } != true)
+                    throw AccessDeniedException("This operation is outside the granted OAuth scope.")
                 handler(current, Arguments(request.arguments().orEmpty()))
             }
             val result = if (readOnly) {
@@ -910,8 +934,12 @@ class BuddyStudyMcpAdapter(
     private class McpArgumentException(message: String) : RuntimeException(message)
 
     companion object {
-        val OAUTH_READ_TOOLS = setOf("list_studies", "get_study", "list_pending_questions", "get_question_process", "list_records", "get_record", "get_topic_stats", "get_study_growth")
+        val OAUTH_READ_TOOLS = setOf("list_studies", "get_study", "list_pending_questions", "get_question_process", "list_records", "get_record", "get_topic_stats", "get_study_growth", "get_grading_process", "list_study_learning_records", "get_voice_learning_record", "list_voice_tutor_sessions", "get_voice_tutor_session", "get_voice_tutor_quota", "get_question_thread")
         val OAUTH_READ_RESOURCES = setOf("buddystudy://studies", "buddystudy://records/recent")
+        val OAUTH_WRITE_TOOLS = setOf("update_study", "create_root_study", "create_study_topic", "suggest_study_topics", "create_study_topics", "skip_question", "request_question", "submit_answer", "request_follow_up", "create_custom_question")
+        val OAUTH_DELETE_TOOLS = setOf("delete_study", "delete_record")
+        val OAUTH_TOOL_SCOPES = OAUTH_READ_TOOLS.associateWith { "learning:read" } +
+            OAUTH_WRITE_TOOLS.associateWith { "learning:write" } + OAUTH_DELETE_TOOLS.associateWith { "learning:delete" }
         const val APPLICATION_JSON = "application/json"
         val READ_TIMEOUT: Duration = Duration.ofSeconds(10)
 

@@ -15,6 +15,21 @@ class McpOAuthControllerTest {
         .webFilter<WebTestClient.ControllerSpec>(McpOAuthSecurityFilter(true)).build()
 
     @Test
+    fun `scope display comes from the cookie bound server request`(): Unit = runBlocking {
+        Mockito.`when`(port.browserScopes(id, "secret")).thenReturn(setOf("learning:read", "learning:write"))
+        client.post().uri("/oauth/session").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id)).exchange().expectStatus().isOk
+            .expectHeader().valueEquals("Cache-Control", "no-store")
+            .expectBody().jsonPath("$.scopes[0]").isEqualTo("learning:read")
+            .jsonPath("$.scopes[1]").isEqualTo("learning:write")
+        client.post().uri("/oauth/session").header(HttpHeaders.ORIGIN, "https://evil.example").header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id)).exchange().expectStatus().isBadRequest
+        Mockito.verify(port, Mockito.times(1)).browserScopes(id, "secret")
+    }
+
+    @Test
     fun `discovery advertises exact audience PKCE public client and issuer response validation`() {
         client.get().uri("/.well-known/oauth-protected-resource/api/v1/mcp").exchange().expectStatus().isOk
             .expectBody().jsonPath("$.resource").isEqualTo("$issuer/api/v1/mcp")

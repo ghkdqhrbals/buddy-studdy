@@ -58,6 +58,8 @@ class BuddyStudyMcpServiceTest {
     private val voiceTutor = Mockito.mock(VoiceTutorUseCase::class.java)
     private val learningRecords = Mockito.mock(BrowseStudyLearningRecordsUseCase::class.java)
     private val studyTree = Mockito.mock(StudyTreeUseCase::class.java)
+    private val followUps = Mockito.mock(com.buddystudy.backend.study.application.port.inbound.FollowUpQuestionUseCase::class.java)
+    private val customQuestions = Mockito.mock(com.buddystudy.backend.study.application.port.inbound.CreateCustomQuestionUseCase::class.java)
     private val service = BuddyStudyMcpService(
         profiles,
         learningContexts,
@@ -72,8 +74,18 @@ class BuddyStudyMcpServiceTest {
         voiceTutor,
         learningRecords,
         studyTree,
+        followUps,
+        customQuestions,
     )
     private val principal = Principal(7, "device-7", 70, anonymous = false)
+
+    @Test
+    fun `record deletion requires exact confirmation before canonical owner deletion`(): Unit = runBlocking {
+        assertThat(runCatching { service.deleteRecord(principal, 91, false) }.exceptionOrNull()).isInstanceOf(ApiException::class.java)
+        Mockito.verifyNoInteractions(answers)
+        assertThat(service.deleteRecord(principal, 91, true)).containsEntry("deleted", true)
+        Mockito.verify(answers).delete(principal, 91)
+    }
 
     @Test
     fun `topic recommendations use the same owned catalog without creating studies or reserving quota`(): Unit = runBlocking {
@@ -499,6 +511,10 @@ class BuddyStudyMcpServiceTest {
             "suggestStudyTopics",
             "createStudyTopics",
             "deleteStudy",
+            "deleteRecord",
+            "requestFollowUp",
+            "getQuestionThread",
+            "createCustomQuestion",
             "listPendingQuestions",
             "skipQuestion",
             "requestQuestion",

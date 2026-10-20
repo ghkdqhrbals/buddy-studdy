@@ -40,7 +40,7 @@ class McpOAuthService(
         require(request.challenge.matches(Regex("[A-Za-z0-9_-]{43}"))) { "invalid_request" }
         require(request.state.length in 1..1024) { "invalid_request" }
         val scopes = request.scope.split(' ').filter(String::isNotEmpty).toSet()
-        require("learning:read" in scopes && scopes.all { it in setOf("learning:read", "offline_access") }) { "invalid_scope" }
+        require("learning:read" in scopes && scopes.all { it in setOf("learning:read", "learning:write", "learning:delete", "offline_access") }) { "invalid_scope" }
         require(store.allowStart(sha256(request.remoteAddress))) { "temporarily_unavailable" }
         val id = secret(); val browser = secret()
         store.insert(McpOAuthGrant(id, clientId, request.redirectUri, request.state, request.challenge,
@@ -79,6 +79,10 @@ class McpOAuthService(
         require(grant.verified && grant.userId != null) { "invalid_request" }
         disconnect(grant.userId, connectionId)
     }
+    @Transactional
+    override suspend fun browserScopes(id: String, browserSecret: String): Set<String> =
+        browserGrant(id, browserSecret).scope.split(' ').toSet()
+
     override suspend fun cleanup(): Long = store.purgeExpired()
 
     @Transactional
@@ -117,7 +121,7 @@ class McpOAuthService(
         require(store.activeUser(grant.userId)) { "access_denied" }
         val code = "bs_mcp_c.$id.${secret()}"
         store.save(grant.copy(codeHash = sha256(code), codeExpiresAt = Instant.now().plusSeconds(60),
-            consentVersion = "learning-read-2026-10-20", consentedAt = Instant.now()))
+            consentVersion = if (grant.scope.split(' ').any { it in setOf("learning:write", "learning:delete") }) "learning-manage-2026-10-21" else "learning-read-2026-10-20", consentedAt = Instant.now()))
         return callback(grant, "code", code)
     }
 

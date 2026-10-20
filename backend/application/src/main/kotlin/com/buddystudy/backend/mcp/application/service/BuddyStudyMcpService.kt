@@ -47,6 +47,8 @@ class BuddyStudyMcpService(
     private val voiceTutor: VoiceTutorUseCase,
     private val learningRecords: BrowseStudyLearningRecordsUseCase,
     private val studyTree: StudyTreeUseCase,
+    private val followUps: com.buddystudy.backend.study.application.port.inbound.FollowUpQuestionUseCase,
+    private val customQuestions: com.buddystudy.backend.study.application.port.inbound.CreateCustomQuestionUseCase,
 ) : BuddyStudyMcpUseCase {
     @RequirePermission(Permissions.PROFILE_READ)
     override suspend fun getMyContext(principal: Principal): McpUserContextResponse {
@@ -147,6 +149,26 @@ class BuddyStudyMcpService(
         studies.deleteStudy(principal, validatedStudyId, expectedStudyIds)
         return McpDeletionResponse(deleted = true, studyId = validatedStudyId)
     }
+
+    @RequirePermission(Permissions.RECORD_DELETE)
+    override suspend fun deleteRecord(principal: Principal, recordId: Long, confirmed: Boolean): Map<String, Any> {
+        if (!confirmed) throw validation("confirm must be true before deleting a learning record.")
+        val id = positiveId(recordId, "record_id")
+        studyAnswers.delete(registered(principal), id)
+        return mapOf("deleted" to true, "recordId" to id)
+    }
+
+    @RequirePermission(Permissions.QUESTION_CREATE)
+    override suspend fun requestFollowUp(principal: Principal, recordId: Long, idempotencyKey: String) =
+        followUps.request(registered(principal), positiveId(recordId, "record_id"), requiredText(idempotencyKey, "idempotency_key"))
+
+    @RequirePermission(Permissions.RECORD_READ)
+    override suspend fun getQuestionThread(principal: Principal, recordId: Long, language: String, view: String) =
+        followUps.thread(registered(principal), positiveId(recordId, "record_id"), language, view)
+
+    @RequirePermission(Permissions.RECORD_UPDATE)
+    override suspend fun createCustomQuestion(principal: Principal, studyId: Long, idempotencyKey: String, question: String, answer: String, language: String) =
+        customQuestions.create(registered(principal), positiveId(studyId, "study_id"), requiredText(idempotencyKey, "idempotency_key"), question, answer, language)
 
     @RequirePermission(Permissions.RECORD_READ)
     override suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int) =

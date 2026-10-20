@@ -82,6 +82,10 @@ interface BuddyStudyMcpUseCase {
         confirmed: Boolean,
         expectedStudyIds: List<Long>? = null,
     ): McpDeletionResponse
+    suspend fun deleteRecord(principal: Principal, recordId: Long, confirmed: Boolean): Map<String, Any>
+    suspend fun requestFollowUp(principal: Principal, recordId: Long, idempotencyKey: String): QuestionGenerationAcceptedResponse
+    suspend fun getQuestionThread(principal: Principal, recordId: Long, language: String, view: String): com.buddystudy.backend.study.application.model.QuestionThreadResponse
+    suspend fun createCustomQuestion(principal: Principal, studyId: Long, idempotencyKey: String, question: String, answer: String, language: String): StudyRecordResponse
     suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
     suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int, studyId: Long): RecordsPageResponse
     suspend fun skipQuestion(principal: Principal, recordId: Long): StudyRecordResponse

@@ -48,6 +48,7 @@ interface McpOAuthUseCase {
     suspend fun start(request: McpOAuthRequest): McpOAuthStart
     suspend fun restart(id: String, browserSecret: String, remoteAddress: String): McpOAuthStart
     suspend fun startManagement(remoteAddress: String): McpOAuthStart
+    suspend fun browserScopes(id: String, browserSecret: String): Set<String>
     suspend fun browserConnections(id: String, browserSecret: String): List<McpOAuthConnection>
     suspend fun browserDisconnect(id: String, browserSecret: String, connectionId: String)
     suspend fun sendCode(id: String, browserSecret: String, email: String, remoteAddress: String): Boolean

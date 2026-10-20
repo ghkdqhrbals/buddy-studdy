@@ -368,7 +368,7 @@ class McpServerConfigTest {
     }
 
     @Test
-    fun `OAuth catalog exposes learning reads without private context voice or writes`() {
+    fun `OAuth catalog exposes learning operations without private profile access`() {
         val useCase = Proxy.newProxyInstance(
             BuddyStudyMcpUseCase::class.java.classLoader, arrayOf(BuddyStudyMcpUseCase::class.java),
         ) { _, method, _ -> error("Catalog must not call ${method.name}") } as BuddyStudyMcpUseCase
@@ -378,7 +378,7 @@ class McpServerConfigTest {
                 .bodyValue("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
                 .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
             val names = JsonMapperProvider.mapper.readTree(body).path("result").path("tools").map { it.path("name").asText() }
-            assertThat(names.toSet()).isEqualTo(BuddyStudyMcpAdapter.OAUTH_READ_TOOLS)
+            assertThat(names.toSet()).isEqualTo(BuddyStudyMcpAdapter.OAUTH_TOOL_SCOPES.keys)
         } finally { fixture.server.close() }
     }
 

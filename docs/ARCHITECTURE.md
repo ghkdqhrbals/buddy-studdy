@@ -832,7 +832,5 @@ the connection. Bounded scheduled cleanup removes expired grants and their ledge
 
 In OAuth mode, the bearer filter accepts dedicated MCP tokens only at the MCP
 route and rejects them at ordinary app APIs. The verified principal supplies the
-user ID; callers cannot select an owner. MCP discovery hides all write and private
-profile tools/resources, and handlers enforce the read scope again before calling
-existing owner-scoped use cases and permission checks. iOS login remains unchanged.
+user ID; callers cannot select an owner. MCP discovery exposes learning operations and hides private profile tools/resources. Each handler checks learning:read, learning:write or learning:delete before calling existing owner-scoped use cases and permission checks. Old read-only tokens cannot expand through refresh. Authoritative browser scope display comes from a cookie-bound session endpoint; management consent has a separate immutable disclosure version. iOS login remains unchanged.
 See [MCP_SERVER.md](MCP_SERVER.md) for lifetimes, flags and verification limits.

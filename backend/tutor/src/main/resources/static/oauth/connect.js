@@ -4,15 +4,17 @@ const manage = new URLSearchParams(location.search).get('manage') === '1';
 let language = navigator.language.startsWith('ko') ? 'ko' : 'en';
 let stage = 'email';
 let activeConnections = null;
+let grantedScopes = new Set();
 const message = document.getElementById('message');
 const emailInput = document.getElementById('email');
 const text = (ko, en) => language === 'ko' ? ko : en;
 function translate() {
   document.documentElement.lang = language;
   const prefix = language === 'ko' ? '' : 'en/';
-  document.getElementById('connection-notice').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}chatgpt-connection-2026-10-20.html`;
+  document.getElementById('connection-notice').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}${grantedScopes.has('learning:write') || grantedScopes.has('learning:delete') ? 'chatgpt-learning-management-2026-10-21.html' : 'chatgpt-connection-2026-10-20.html'}`;
   document.getElementById('privacy').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}privacy.html`;
   document.querySelectorAll('[data-ko]').forEach(node => { node.textContent = node.dataset[language]; });
+  document.querySelectorAll('[data-scope]').forEach(node => { node.hidden = !grantedScopes.has(node.dataset.scope); });
   document.getElementById('language').textContent = language === 'ko' ? 'English' : '한국어';
   const titles = {
     email: text(manage ? '연결 관리 로그인' : 'BuddyStudy 로그인', manage ? 'Manage connections' : 'Sign in to BuddyStudy'),
@@ -23,7 +25,7 @@ function translate() {
   const descriptions = {
     email: text('연결할 계정의 이메일을 입력하세요.', 'Enter your BuddyStudy account email.'),
     code: text(`${emailInput.value.trim()} 메일함을 확인하세요.`, `Enter the code sent to ${emailInput.value.trim()}.`),
-    consent: text('BuddyStudy 학습 기록을 공유합니다.', 'Share your BuddyStudy learning records.'),
+    consent: text(grantedScopes.has('learning:write') ? 'ChatGPT에서 내 학습을 이어갑니다.' : 'BuddyStudy 학습 기록을 공유합니다.', grantedScopes.has('learning:write') ? 'Continue your learning in ChatGPT.' : 'Share your BuddyStudy learning records.'),
     connections: text('내 학습 기록에 접근할 수 있는 앱입니다.', 'Apps with access to your learning records.'),
   };
   document.getElementById('screen-title').textContent = titles[stage];
@@ -75,6 +77,8 @@ document.getElementById('code-form').addEventListener('submit', event => {
   busy(async () => {
     const result = await request('/oauth/verify', {code: document.getElementById('code').value});
     if (!result.verified) throw new Error(text('인증번호를 확인해 주세요. 최대 5회까지 입력할 수 있습니다.', 'Check your code. A maximum of five attempts is allowed.'));
+    const session = await request('/oauth/session', {});
+    grantedScopes = new Set(session.scopes);
     document.getElementById('account-email').textContent = emailInput.value.trim().toLowerCase();
     setStage(manage ? 'connections' : 'consent');
     if (manage) await showConnections();

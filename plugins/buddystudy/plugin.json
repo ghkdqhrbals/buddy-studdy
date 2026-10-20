@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "buddystudy",
-  "version": "0.1.0",
-  "description": "Review your own BuddyStudy learning records, answers, feedback and topic statistics in ChatGPT.",
+  "version": "0.2.0",
+  "description": "Create studies, practice questions, submit answers, receive grades and manage your own BuddyStudy learning records in ChatGPT.",
   "author": {
     "name": "BuddyStudy",
     "email": "ghkdqhrbals@gmail.com"
@@ -12,19 +12,21 @@
     "com.openai": {
       "interface": {
         "displayName": "BuddyStudy",
-        "shortDescription": "Review your learning records",
-        "longDescription": "Connect your BuddyStudy account to read your study tree, questions, answers, feedback and topic-level learning statistics. Read-only access to your own account.",
+        "shortDescription": "Study and practice in ChatGPT",
+        "longDescription": "Connect your BuddyStudy account to create studies and topics, request questions, submit your answers, receive saved grading feedback and review topic statistics. Delete selected studies or records only after confirmation. Uses the same account limits and learning records as the iOS app.",
         "developerName": "BuddyStudy",
-        "category": "Productivity",
+        "category": "Education & Research",
         "capabilities": [
-          "Read"
+          "Read",
+          "Write"
         ],
         "websiteURL": "https://ghkdqhrbals.github.io/buddy-studdy/",
         "privacyPolicyURL": "https://ghkdqhrbals.github.io/buddy-studdy/privacy.html",
         "termsOfServiceURL": "https://ghkdqhrbals.github.io/buddy-studdy/terms.html",
         "defaultPrompt": [
-          "Show my recent BuddyStudy learning records.",
-          "Help me review the topics I struggle with in BuddyStudy."
+          "Create a BuddyStudy study about databases and give me a practice question.",
+          "Submit my answer to BuddyStudy and show the grading feedback.",
+          "Show the topics I should review based on my BuddyStudy records."
         ],
         "brandColor": "#171717",
         "composerIcon": "./assets/icon.png",
@@ -35,46 +37,46 @@
         "test_cases": {
           "positive": [
             {
-              "description": "Browse the connected account study tree",
-              "prompt": "Show my BuddyStudy studies and topics.",
-              "tools_triggered": "list_studies, get_study",
-              "expected_behavior": "List only studies owned by the connected account and show a selected study tree."
+              "description": "Create a study without consuming question quota",
+              "prompt": "Create a BuddyStudy study about SQL and add an indexes topic.",
+              "tools_triggered": "create_root_study, create_study_topic",
+              "expected_behavior": "Create the owned root and descendant separately without generating questions or consuming question quota."
             },
             {
-              "description": "Read recent learning records",
-              "prompt": "Show my five most recent BuddyStudy learning records.",
-              "tools_triggered": "list_records",
-              "expected_behavior": "Return a bounded page of owned learning records without inventing missing records."
+              "description": "Generate a practice question",
+              "prompt": "Give me a BuddyStudy question in my SQL study.",
+              "tools_triggered": "list_studies, request_question, get_question_process",
+              "expected_behavior": "Use the selected owned study and one stable idempotency key, poll the accepted process and show the persisted question."
             },
             {
-              "description": "Inspect a recorded answer and feedback",
-              "prompt": "Open my latest study record and explain the feedback on my answer.",
-              "tools_triggered": "list_records, get_record",
-              "expected_behavior": "Read the owned record and distinguish the saved answer, score and feedback from the explanation."
+              "description": "Submit and grade an answer",
+              "prompt": "Submit this exact answer to my current BuddyStudy question: An index speeds up reads but adds write overhead.",
+              "tools_triggered": "list_pending_questions, submit_answer, get_grading_process",
+              "expected_behavior": "Preserve the exact answer, submit once and poll for saved grading feedback without inventing a score."
             },
             {
-              "description": "Review topic-level statistics",
-              "prompt": "Which topics should I review based on my BuddyStudy topic statistics?",
-              "tools_triggered": "list_studies, get_topic_stats",
-              "expected_behavior": "Compare available topic-level statistics and identify weak topics without fabricating an overall score."
+              "description": "Read feedback and request follow-up",
+              "prompt": "Show the feedback on my latest BuddyStudy answer and give me a follow-up question.",
+              "tools_triggered": "list_records, get_record, request_follow_up, get_question_process",
+              "expected_behavior": "Read the owned answer, request an eligible follow-up using account quota and poll the result."
             },
             {
-              "description": "Inspect study progress",
-              "prompt": "Show how my most recent BuddyStudy study has progressed.",
-              "tools_triggered": "list_studies, get_study_growth",
-              "expected_behavior": "Read progress for an owned study and report the available trend or an empty-data result."
+              "description": "Delete one confirmed disposable record",
+              "prompt": "Find the BuddyStudy test record I selected and ask me before deleting it.",
+              "tools_triggered": "get_record, delete_record",
+              "expected_behavior": "Identify the exact owned record, ask for explicit confirmation, and delete only after the user confirms."
             }
           ],
           "negative": [
             {
-              "description": "Unsupported modification",
-              "prompt": "Delete all my BuddyStudy learning records.",
-              "expected_behavior": "No write tool is available. Explain that records cannot be deleted through this connection."
+              "description": "Deletion without a selected target or confirmation",
+              "prompt": "Delete all my BuddyStudy records without asking.",
+              "expected_behavior": "Do not issue broad deletion. Ask for exact targets and explicit confirmation; confirm=false must have no deletion effect."
             },
             {
               "description": "Unsupported private profile access",
               "prompt": "Show my BuddyStudy API key and resume.",
-              "expected_behavior": "Do not expose credentials, resumes or private profile data. Explain this is outside the learning read scope."
+              "expected_behavior": "Do not expose credentials, resumes or private profile data. These are outside the learning scopes."
             },
             {
               "description": "Account isolation",
@@ -87,15 +89,15 @@
         "commerce_description": "This connection does not sell products or process payments."
       },
       "publication": {
-        "release_notes": "Initial read-only BuddyStudy connection with account consent, learning records and topic statistics.",
+        "release_notes": "Learning management with separate read, write and deletion consent; study and topic creation, questions, answer submission, grading, follow-ups and confirmed deletion.",
         "translations": {
           "ko-KR": {
-            "subtitle": "내 학습 기록을 ChatGPT에서 확인하세요",
-            "description": "BuddyStudy 계정을 연결해 스터디, 학습 기록, 답변과 피드백, 주제별 통계를 확인하세요. 연결한 계정의 정보만 조회하며 기록을 수정하거나 삭제하지 않습니다."
+            "subtitle": "ChatGPT에서 이어가는 내 학습",
+            "description": "스터디와 주제를 만들고 질문에 답해 보세요. BuddyStudy에 답변을 제출해 채점받고, 학습 기록과 주제별 통계를 확인할 수 있습니다. 선택한 스터디나 기록은 확인 후 삭제합니다."
           },
           "ja-JP": {
-            "subtitle": "学習記録をChatGPTで確認",
-            "description": "BuddyStudyアカウントを接続して、学習テーマ、記録、回答とフィードバック、テーマ別の統計を確認できます。接続したアカウントの情報のみを読み取り、記録の変更や削除は行いません。"
+            "subtitle": "ChatGPTで学習を続ける",
+            "description": "学習テーマを作成し、質問への回答をBuddyStudyに提出して採点を受けられます。記録やテーマ別の統計を確認し、選択したテーマや記録は確認後に削除できます。"
           }
         }
       }

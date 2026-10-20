@@ -25,6 +25,25 @@ class McpOAuthServiceTest {
         "$issuer/api/v1/mcp", "learning:read offline_access", "code", "S256")
 
     @Test
+    fun `management consent grants exact requested scopes and refresh cannot widen old consent`(): Unit = runBlocking {
+        val scopes = "learning:read learning:write learning:delete offline_access"
+        val start = service.start(request().copy(scope = scopes))
+        assertThat(service.browserScopes(start.id, start.browserSecret)).containsExactlyInAnyOrderElementsOf(scopes.split(' '))
+        assertThat(runCatching { service.browserScopes(start.id, "wrong") }.isFailure).isTrue()
+        service.sendCode(start.id, start.browserSecret, "user@example.com", "ip")
+        service.verifyCode(start.id, start.browserSecret, sentCode)
+        val code = query(service.consent(start.id, start.browserSecret, true))["code"]!!
+        val tokens = service.token(exchange(code)).tokens!!
+        assertThat(service.authenticate(tokens.access_token)!!.oauthScopes).contains("learning:write", "learning:delete")
+        assertThat(store.rows[start.id]!!.consentVersion).isEqualTo("learning-manage-2026-10-21")
+        val (_, readCode) = authorize()
+        val read = service.token(exchange(readCode)).tokens!!
+        val expanded = service.token(mapOf("grant_type" to "refresh_token", "client_id" to "client", "resource" to "$issuer/api/v1/mcp", "refresh_token" to read.refresh_token!!, "scope" to scopes))
+        assertThat(expanded.error).isNotNull()
+        assertThat(service.authenticate(read.access_token)!!.oauthScopes).doesNotContain("learning:write", "learning:delete")
+    }
+
+    @Test
     fun `login consent and code exchange issue owner-scoped independent tokens`(): Unit = runBlocking {
         val start = service.start(request())
         assertThat(service.sendCode(start.id, start.browserSecret, "USER@example.com", "ip")).isTrue()
