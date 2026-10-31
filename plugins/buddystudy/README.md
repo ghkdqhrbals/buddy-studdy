@@ -89,6 +89,10 @@ Official references:
 
 ## Public review preparation
 
+The current completion audit and remaining evidence are in [SUBMISSION.md](SUBMISSION.md).
+Build a separate candidate upload with `python3 scripts/package-buddystudy-plugin.py`.
+Passing its local package checks does not mean the live cases or portal review passed.
+
 The publication ZIP includes five positive and three negative review scenarios,
 listing metadata, public support/privacy/terms URLs, and the remote OAuth MCP
 configuration. It contains no reviewer credentials.
