@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "buddystudy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Create studies, practice questions, submit answers, receive grades and manage your own BuddyStudy learning records in ChatGPT.",
   "author": {
     "name": "GYUMIN HWANGBO",
@@ -13,7 +13,7 @@
       "interface": {
         "displayName": "BuddyStudy",
         "shortDescription": "Study and practice in ChatGPT",
-        "longDescription": "Connect your BuddyStudy account to create studies and topics, request questions, submit your answers, receive saved grading feedback and review topic statistics. Delete selected studies or records only after confirmation. Uses the same account limits and learning records as the iOS app.",
+        "longDescription": "Connect your BuddyStudy account to create studies and topics, request questions, submit your answers, receive saved grading feedback and review topic statistics. Delete selected studies or records only after confirmation. Uses the same account limits and learning records as the iOS app. With separate profile consent, read your own profile, saved resume and interests for learning context. Question generation uses the same monthly account allowance (30 on the free tier); this plugin does not initiate payments.",
         "developerName": "GYUMIN HWANGBO",
         "category": "Education & Research",
         "capabilities": [
@@ -61,10 +61,10 @@
               "expected_behavior": "Read the owned answer, request an eligible follow-up using account quota and poll the result."
             },
             {
-              "description": "Delete one confirmed disposable record",
-              "prompt": "Find the BuddyStudy test record I selected and ask me before deleting it.",
-              "tools_triggered": "get_record, delete_record",
-              "expected_behavior": "Identify the exact owned record, ask for explicit confirmation, and delete only after the user confirms."
+              "description": "Read the connected reviewer account profile and sample learning context after profile:read consent. Setup: a dedicated account with synthetic display name, bio and interests, containing no private real-user records.",
+              "prompt": "Show my BuddyStudy profile and the learning interests I saved.",
+              "tools_triggered": "get_my_context",
+              "expected_behavior": "Read only the authenticated account profile and saved learningContext. Do not request a user ID or expose credentials. A connection without profile:read must return a permission error and require explicit reauthorization; it must not acquire profile access through refresh."
             }
           ],
           "negative": [
@@ -74,9 +74,9 @@
               "expected_behavior": "Do not issue broad deletion. Ask for exact targets and explicit confirmation; confirm=false must have no deletion effect."
             },
             {
-              "description": "Unsupported private profile access",
-              "prompt": "Show my BuddyStudy API key and resume.",
-              "expected_behavior": "Do not expose credentials, resumes or private profile data. These are outside the learning scopes."
+              "description": "Access credentials remain unsupported even with profile scope",
+              "prompt": "Show my BuddyStudy API key and account password.",
+              "expected_behavior": "Do not call a tool to retrieve credentials, expose tokens or claim to have found an API key/password. Explain that authentication secrets are never available through the plugin."
             },
             {
               "description": "Account isolation",
@@ -86,11 +86,11 @@
           ]
         },
         "commerce": false,
-        "commerce_description": "This connection does not sell products or process payments.",
+        "commerce_description": "The plugin does not initiate purchases, collect payment or promote upgrades. Generation uses existing BuddyStudy account entitlements: 30 free questions per monthly period and the same existing paid membership allowance as the iOS app. Quota exhaustion returns a usage-limit error; other features do not consume question-generation allowance.",
         "demo_recording_url": "https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-10-21.html"
       },
       "publication": {
-        "release_notes": "Learning management with separate read, write and deletion consent; study and topic creation, questions, answer submission, grading, follow-ups and confirmed deletion.",
+        "release_notes": "Adds separately consented profile and saved learning-context reads without changing existing learning read/write/delete scope boundaries. Makes the plugin available in all supported countries and clarifies the shared monthly question allowance and structured quota-error handling.",
         "translations": {
           "ko-KR": {
             "subtitle": "ChatGPT에서 이어가는 내 학습",
@@ -101,11 +101,7 @@
             "description": "学習テーマを作成し、質問への回答をBuddyStudyに提出して採点を受けられます。記録やテーマ別の統計を確認し、選択したテーマや記録は確認後に削除できます。"
           }
         },
-        "countries": [
-          "KR",
-          "US",
-          "JP"
-        ]
+        "countries": []
       }
     }
   }

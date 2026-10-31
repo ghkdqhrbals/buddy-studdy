@@ -109,6 +109,8 @@ class McpServerConfig(
             Honor the learner's requested language when presenting questions and feedback. Read get_record with language and view=localized after generation; use source_language for the learner's actual answer language. Do not impose an incidental English-answer instruction from a generated prompt when the learner requested Korean practice; preserve the original stored question and submit their original Korean answer without translating or rewriting it.
             Question generation and answer grading are asynchronous: keep correlation IDs internal and poll the matching process tool until terminal. Show the persisted question itself, not only a generation receipt or record ID. A generation failure must be reported accurately.
             Delete a study subtree or learning record only after explicit user confirmation of the exact target and pass confirm=true. Existing read-only grants cannot write; reconnect and grant the requested scopes.
+            Private profile, saved resume and interests are available through get_my_context only after explicit profile:read consent. Existing learning grants cannot acquire this scope through refresh; reconnect when the user requests profile access.
+            Generation uses the existing monthly account allowance (30 on the free tier). QUOTA_EXCEEDED is a usage/entitlement limit, not an authentication error. Explain only returned limits/reset data; never promote upgrades, initiate checkout or repeatedly retry a rejected request.
             Interpret scores topic by topic and with difficulty context; do not manufacture a global average across unrelated topics.
         """.trimIndent()
     }

@@ -40,7 +40,7 @@ class McpOAuthService(
         require(request.challenge.matches(Regex("[A-Za-z0-9_-]{43}"))) { "invalid_request" }
         require(request.state.length in 1..1024) { "invalid_request" }
         val scopes = request.scope.split(' ').filter(String::isNotEmpty).toSet()
-        require("learning:read" in scopes && scopes.all { it in setOf("learning:read", "learning:write", "learning:delete", "offline_access") }) { "invalid_scope" }
+        require("learning:read" in scopes && scopes.all { it in setOf("learning:read", "learning:write", "learning:delete", "profile:read", "offline_access") }) { "invalid_scope" }
         require(store.allowStart(sha256(request.remoteAddress))) { "temporarily_unavailable" }
         val id = secret(); val browser = secret()
         store.insert(McpOAuthGrant(id, clientId, request.redirectUri, request.state, request.challenge,
@@ -143,7 +143,7 @@ class McpOAuthService(
         require(store.activeUser(grant.userId)) { "access_denied" }
         val code = "bs_mcp_c.$id.${secret()}"
         store.save(grant.copy(codeHash = sha256(code), codeExpiresAt = Instant.now().plusSeconds(60),
-            consentVersion = if (grant.scope.split(' ').any { it in setOf("learning:write", "learning:delete") }) "learning-manage-2026-10-21" else "learning-read-2026-10-20", consentedAt = Instant.now()))
+            consentVersion = if ("profile:read" in grant.scope.split(' ')) "learning-profile-manage-2026-10-31" else if (grant.scope.split(' ').any { it in setOf("learning:write", "learning:delete") }) "learning-manage-2026-10-21" else "learning-read-2026-10-20", consentedAt = Instant.now()))
         return callback(grant, "code", code)
     }
 

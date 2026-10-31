@@ -918,3 +918,26 @@ The same new conversation also accepted “그럼 이거랑 연결해서 꼬리 
 and completed a BuddyStudy follow-up associated with the preceding answer.
 No user prompt in this new conversation supplied a record/study ID, tool name
 or special submit command. The normal response also omitted internal IDs.
+
+
+## Profile scope and public release alignment (2026-10-31)
+
+The public release candidate follows remote main 679c730a, rather than the older
+local checkout. Existing learning read/write/delete contracts are preserved.
+get_my_context and buddystudy://me/context require a new profile:read scope;
+their discovery and invocation use the same central scope mappings. Older grants
+retain their learning permissions without acquiring profile access. Fresh
+profile consent records learning-profile-manage-2026-10-31 and links the new
+KO/EN/JA notice. Profile editing and credentials remain unavailable.
+
+Publisher GYUMIN HWANGBO and worldwide targeting are in package 0.2.1. Generation
+uses the existing 30-question free monthly allowance and paid entitlements; quota
+exhaustion remains an error rather than a checkout or upgrade prompt. The previous
+72-second demo is historical evidence, not validation of the added profile scope.
+
+Latest-source verification: 129 focused OAuth/MCP/service/transport/logging tests
+passed. This includes profile-scope consent and refresh restrictions, preservation
+of existing learning scope boundaries, exact catalog discovery and profile-body
+redaction in exchange logs. Plugin JSON, JS syntax and diff checks passed.
+The privacy alias routing is preserved at the currently published September 2
+version, with its previously missing KO/EN/JA source restored for publication.

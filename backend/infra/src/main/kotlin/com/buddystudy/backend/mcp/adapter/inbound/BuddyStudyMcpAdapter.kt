@@ -703,7 +703,7 @@ class BuddyStudyMcpAdapter(
             val completed = mono {
                 val current = principal(context)
                 val scopes = current.oauthScopes
-                if (scopes != null && ("learning:read" !in scopes || uri !in OAUTH_READ_RESOURCES))
+                if (scopes != null && OAUTH_RESOURCE_SCOPES[uri]?.let { it in scopes } != true)
                     throw AccessDeniedException("OAuth resource is outside the granted scope.")
                 handler(current)
             }
@@ -935,11 +935,17 @@ class BuddyStudyMcpAdapter(
 
     companion object {
         val OAUTH_READ_TOOLS = setOf("list_studies", "get_study", "list_pending_questions", "get_question_process", "list_records", "get_record", "get_topic_stats", "get_study_growth", "get_grading_process", "list_study_learning_records", "get_voice_learning_record", "list_voice_tutor_sessions", "get_voice_tutor_session", "get_voice_tutor_quota", "get_question_thread")
-        val OAUTH_READ_RESOURCES = setOf("buddystudy://studies", "buddystudy://records/recent")
+        val OAUTH_RESOURCE_SCOPES = mapOf(
+            "buddystudy://studies" to "learning:read",
+            "buddystudy://records/recent" to "learning:read",
+            "buddystudy://me/context" to "profile:read",
+        )
+        val OAUTH_READ_RESOURCES = OAUTH_RESOURCE_SCOPES.keys
         val OAUTH_WRITE_TOOLS = setOf("update_study", "create_root_study", "create_study_topic", "suggest_study_topics", "create_study_topics", "skip_question", "request_question", "submit_answer", "request_follow_up", "create_custom_question")
         val OAUTH_DELETE_TOOLS = setOf("delete_study", "delete_record")
         val OAUTH_TOOL_SCOPES = OAUTH_READ_TOOLS.associateWith { "learning:read" } +
-            OAUTH_WRITE_TOOLS.associateWith { "learning:write" } + OAUTH_DELETE_TOOLS.associateWith { "learning:delete" }
+            OAUTH_WRITE_TOOLS.associateWith { "learning:write" } + OAUTH_DELETE_TOOLS.associateWith { "learning:delete" } +
+            mapOf("get_my_context" to "profile:read")
         const val APPLICATION_JSON = "application/json"
         val READ_TIMEOUT: Duration = Duration.ofSeconds(10)
 

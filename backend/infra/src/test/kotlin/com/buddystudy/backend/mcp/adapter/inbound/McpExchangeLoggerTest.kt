@@ -24,6 +24,22 @@ class McpExchangeLoggerTest {
     private val context = McpExchangeContext(42, "voice", "parent-123", "session-123", "call-123")
 
     @Test
+    fun `profile and context responses reach the caller without entering exchange logs`() {
+        for ((operation, target) in listOf("tools/call" to "get_my_context", "resources/read" to "my-buddystudy-context")) {
+            val rows = captureLogs {
+                val value = observer.observeMono(context, operation, target, emptyMap<String, Any>(),
+                    response = { output: String -> McpExchangeResponse(output) }) {
+                    Mono.just("""{"profile":{"email":"private-profile-canary@example.test"},"learningContext":{"resumeMarkdown":"private-resume-canary"}}""")
+                }.block()
+                assertThat(value).contains("private-resume-canary")
+            }
+            assertThat(rows.single().path("status").asInt()).isEqualTo(200)
+            assertThat(rows.single().path("responseBody").path("redacted").asBoolean()).isTrue()
+            assertThat(rows.toString()).doesNotContain("private-profile-canary", "private-resume-canary")
+        }
+    }
+
+    @Test
     fun `successful suspended operation retains request response correlation and elapsed milliseconds`() {
         val rows = captureLogs {
             val actual = runBlocking {

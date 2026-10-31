@@ -368,7 +368,7 @@ class McpServerConfigTest {
     }
 
     @Test
-    fun `OAuth catalog exposes learning operations without private profile access`() {
+    fun `OAuth catalog exposes learning operations and separately scoped profile read`() {
         val useCase = Proxy.newProxyInstance(
             BuddyStudyMcpUseCase::class.java.classLoader, arrayOf(BuddyStudyMcpUseCase::class.java),
         ) { _, method, _ -> error("Catalog must not call ${method.name}") } as BuddyStudyMcpUseCase
@@ -379,6 +379,9 @@ class McpServerConfigTest {
                 .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
             val names = JsonMapperProvider.mapper.readTree(body).path("result").path("tools").map { it.path("name").asText() }
             assertThat(names.toSet()).isEqualTo(BuddyStudyMcpAdapter.OAUTH_TOOL_SCOPES.keys)
+            assertThat(names).contains("get_my_context", "request_question", "submit_answer")
+            assertThat(names).doesNotContain("update_my_learning_context")
+            assertThat(BuddyStudyMcpAdapter.OAUTH_TOOL_SCOPES["get_my_context"]).isEqualTo("profile:read")
         } finally { fixture.server.close() }
     }
 

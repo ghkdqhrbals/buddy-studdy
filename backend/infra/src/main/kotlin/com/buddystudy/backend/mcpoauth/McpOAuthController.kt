@@ -63,7 +63,7 @@ class McpOAuthController(
     private val resource get() = "$issuer/api/v1/mcp"
     @GetMapping("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/v1/mcp")
     fun resourceMetadata() = mapOf("resource" to resource, "authorization_servers" to listOf(issuer),
-        "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "offline_access"), "bearer_methods_supported" to listOf("header"))
+        "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "profile:read", "offline_access"), "bearer_methods_supported" to listOf("header"))
 
     @GetMapping("/.well-known/oauth-authorization-server")
     fun authorizationMetadata() = mapOf(
@@ -73,7 +73,7 @@ class McpOAuthController(
         "token_endpoint_auth_methods_supported" to listOf("none"), "revocation_endpoint_auth_methods_supported" to listOf("none"),
         "code_challenge_methods_supported" to listOf("S256"),
         "authorization_response_iss_parameter_supported" to true,
-        "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "offline_access"))
+        "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "profile:read", "offline_access"))
 
     @GetMapping("/oauth/authorize")
     suspend fun authorize(@RequestParam parameters: MultiValueMap<String, String>, exchange: ServerWebExchange): ResponseEntity<Void> {

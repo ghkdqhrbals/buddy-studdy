@@ -1,6 +1,6 @@
 # BuddyStudy for ChatGPT
 
-End users connect their **own** BuddyStudy account to create studies and topics, request questions, submit answers for grading and manage learning records. Existing ownership checks and account quotas apply. Study/topic creation does not consume question quota. Deletion requires confirmation of the exact target. Account administration, API keys, resumes and private profile tools remain excluded.
+End users connect their **own** BuddyStudy account to create studies and topics, request questions, submit answers for grading and manage learning records. Existing ownership checks and account quotas apply. Study/topic creation does not consume question quota. Deletion requires confirmation of the exact target. Account administration, API keys and profile edits remain excluded. Profile, saved resume and interests require the separately consented profile:read scope.
 
 ## Backend configuration
 
@@ -42,7 +42,7 @@ and workspace) with these values:
 | Client ID | `buddystudy-chatgpt` |
 | Token endpoint authentication | `none` (public client + PKCE S256) |
 | Client secret | None |
-| Scopes | `learning:read learning:write learning:delete offline_access` |
+| Scopes | `learning:read learning:write learning:delete profile:read offline_access` |
 | Resource | `https://api.ghkdqhrbals.org/api/v1/mcp` |
 
 Discovery supplies `/oauth/authorize` and `/oauth/token`. The server advertises
@@ -136,3 +136,27 @@ the tested missing-submission case. Language-consistent practice still fails:
 Korean presentation retained an English-answer penalty in the saved grading.
 Do not treat that language case, GPT-6 rendering, multi-question ambiguity or
 the whole public submission as verified by this limited success.
+
+
+## Profile and worldwide release candidate (2026-10-31)
+
+The 0.2.1 candidate is based on remote main 679c730a, preserving existing learning
+creation, generation, grading, follow-ups and confirmed-deletion behavior. It adds
+get_my_context and buddystudy://me/context under a dedicated profile:read scope.
+Existing learning grants cannot read profiles or acquire that scope on refresh;
+users must reconnect and explicitly consent to the profile disclosure. The new
+notice is chatgpt-profile-learning-2026-10-31.html with consent version
+learning-profile-manage-2026-10-31. Account terms and optional connection consent
+remain separate.
+
+Publisher identity remains the verified GYUMIN HWANGBO. Country targeting is all
+supported countries, as selected by the owner for this candidate. The account's
+existing question allowance applies (30 on the free monthly tier); the plugin
+neither promotes upgrades nor initiates payment. The profile review case replaces
+the destructive demo case so no new live deletion is required for that case.
+
+The prior hosted demo and live generation/grading evidence remain historical
+preparation evidence. They do not prove the new profile consent, current exact
+review cases or the known Korean-answer grading locale defect. Revalidate the
+candidate with the existing dedicated reviewer account; do not use a private
+real-user account. No public submission or publication is claimed by this note.

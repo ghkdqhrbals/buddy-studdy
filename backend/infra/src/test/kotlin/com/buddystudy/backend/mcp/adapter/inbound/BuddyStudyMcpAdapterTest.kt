@@ -989,6 +989,25 @@ class BuddyStudyMcpAdapterTest {
         assertThat(invoked).isFalse()
     }
 
+    @Test
+    fun `dedicated profile scope reads only the authenticated context without granting profile writes`() {
+        val owner = Principal(7, "mcp:test", 0, false, oauthScopes = setOf("learning:read", "profile:read"))
+        var calls = 0
+        val instance = adapter(proxyUseCase { method, args ->
+            assertThat(method).isEqualTo("getMyContext")
+            assertThat(args[0]).isEqualTo(owner)
+            calls++
+            mapOf("profile" to mapOf("displayName" to "Reviewer"), "learningContext" to mapOf("interests" to listOf("SQL")))
+        })
+        val context = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to owner))
+        assertThat(call(instance, "get_my_context", emptyMap(), context).isError()).isFalse()
+        val spec = instance.resources().single { it.resource().uri() == "buddystudy://me/context" }
+        val result = spec.readHandler().apply(context, McpSchema.ReadResourceRequest("buddystudy://me/context", null)).block()!!
+        assertThat(result.contents().toString()).contains("Reviewer", "SQL").doesNotContain("PERMISSION_DENIED")
+        assertThat(errorDetails(call(instance, "update_my_learning_context", emptyMap(), context))).containsEntry("status", 403)
+        assertThat(calls).isEqualTo(2)
+    }
+
     private fun adapter(useCase: BuddyStudyMcpUseCase = proxyUseCase { method, _ ->
         error("Unexpected use-case call: $method")
     }, mapper: ObjectMapper = jacksonObjectMapper().findAndRegisterModules()): BuddyStudyMcpAdapter = BuddyStudyMcpAdapter(

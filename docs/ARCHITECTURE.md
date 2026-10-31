@@ -834,3 +834,8 @@ In OAuth mode, the bearer filter accepts dedicated MCP tokens only at the MCP
 route and rejects them at ordinary app APIs. The verified principal supplies the
 user ID; callers cannot select an owner. MCP discovery exposes learning operations and hides private profile tools/resources. Each handler checks learning:read, learning:write or learning:delete before calling existing owner-scoped use cases and permission checks. Old read-only tokens cannot expand through refresh. Authoritative browser scope display comes from a cookie-bound session endpoint; management consent has a separate immutable disclosure version. iOS login remains unchanged.
 See [MCP_SERVER.md](MCP_SERVER.md) for lifetimes, flags and verification limits.
+
+MCP profile reads use profile:read as a separate OAuth scope and retain the
+existing owner-scoped PROFILE_READ use case. Tool/resource discovery and handlers
+share their scope maps. Learning read/write/delete scopes alone do not authorize
+private profile or learning-context reads.
