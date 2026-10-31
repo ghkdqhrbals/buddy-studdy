@@ -75,6 +75,9 @@ buddystudy:
       issuer: ${MCP_OAUTH_ISSUER:https://api.ghkdqhrbals.org}
       client-id: ${MCP_OAUTH_CLIENT_ID:buddystudy-chatgpt}
       redirect-uris: ${MCP_OAUTH_REDIRECT_URIS:https://chatgpt.com/connector_platform_oauth_redirect}
+      google-client-id: ${MCP_OAUTH_GOOGLE_CLIENT_ID:}
+      google-client-secret: ${MCP_OAUTH_GOOGLE_CLIENT_SECRET:}
+      apple-client-id: ${MCP_OAUTH_APPLE_CLIENT_ID:}
     allowed-origins: ${MCP_ALLOWED_ORIGINS:}
     allowed-hosts: ${MCP_ALLOWED_HOSTS:api.ghkdqhrbals.org,api.lowfidev.cloud,lowfidev.cloud,localhost:*,127.0.0.1:*}
     request-timeout-seconds: ${MCP_REQUEST_TIMEOUT_SECONDS:30}

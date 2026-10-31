@@ -1,0 +1,4 @@
+Apple and Google brand icons: Font Awesome Free 6.x, Fonticons, Inc.
+Icons licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+Source: https://github.com/FortAwesome/Font-Awesome/tree/6.x/svgs/brands
+Brand trademarks belong to their respective owners.

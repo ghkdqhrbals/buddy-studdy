@@ -22,6 +22,7 @@ class McpOAuthService(
     @Value("\${buddystudy.mcp.oauth.issuer:https://api.ghkdqhrbals.org}") val issuer: String,
     @Value("\${buddystudy.mcp.oauth.client-id:buddystudy-chatgpt}") private val clientId: String,
     @Value("\${buddystudy.mcp.oauth.redirect-uris:https://chatgpt.com/connector_platform_oauth_redirect}") redirects: String,
+    private val social: McpOAuthSocialIdentityPort = UnavailableMcpOAuthSocialIdentityPort,
 ) : McpOAuthUseCase {
     private val random = SecureRandom()
     private val redirectUris = redirects.split(',').map(String::trim).toSet()
@@ -30,6 +31,49 @@ class McpOAuthService(
         require(URI(issuer).let { it.scheme == "https" && it.host != null && it.rawQuery == null && it.rawFragment == null && it.rawUserInfo == null && it.rawPath.isNullOrEmpty() })
         require(!issuer.endsWith('/'))
         require(redirectUris.all { URI(it).let { uri -> uri.scheme == "https" && uri.host != null && uri.rawFragment == null } })
+    }
+
+    @Transactional
+    override suspend fun startSocial(id: String, browserSecret: String, provider: String): String {
+        val grant = browserGrant(id, browserSecret)
+        require(provider in social.providers() && !grant.verified && grant.codeHash == null && grant.accessHash == null)
+        require(store.allowToken(sha256(id)))
+        val state = "bs_mcp_s.$id.${secret()}"
+        val nonce = secret()
+        store.save(grant.copy(userId = null, verifiedEmail = null, emailCodeHash = null,
+            socialProvider = provider, socialStateHash = sha256(state), socialNonceHash = sha256(nonce), socialAuthenticated = false, socialResultHash = null))
+        return social.authorize(provider, state, nonce)
+    }
+
+    override fun loginProviders(): Set<String> = social.providers()
+
+    @Transactional
+    override suspend fun socialCallback(provider: String, state: String, code: String, idToken: String, error: String): String {
+        val id = tokenId(state, "s") ?: throw IllegalArgumentException("invalid_request")
+        val grant = store.find(id, true)
+        require(grant != null && !grant.revoked && grant.expiresAt.isAfter(Instant.now()) && !grant.verified &&
+            grant.codeHash == null && grant.accessHash == null && grant.socialProvider == provider &&
+            equal(grant.socialStateHash, sha256(state))) { "invalid_request" }
+        val identity = if (error.isEmpty()) social.verify(provider, code, idToken) else null
+        val account = identity?.takeIf { equal(grant.socialNonceHash, sha256(it.nonce)) }
+            ?.let { store.socialAccount(provider.uppercase(), it.providerId) }
+        // Consume state even on failure. Provider identity alone cannot authorize this browser.
+        val result = if (account != null) secret() else null
+        store.save(grant.copy(userId = account?.id, verifiedEmail = account?.email,
+            socialStateHash = null, socialNonceHash = null, socialAuthenticated = account != null, socialResultHash = result?.let(::sha256)))
+        val mode = if (grant.managementOnly) "&manage=1" else ""
+        return "/oauth/connect.html?id=$id$mode&" + if (result != null) "login_result=$result" else "login_error=1"
+    }
+
+    @Transactional
+    override suspend fun loginState(id: String, browserSecret: String, result: String): McpOAuthLoginState {
+        val grant = browserGrant(id, browserSecret)
+        // Both the original browser cookie and callback-only one-time result are required.
+        // An initiator cannot poll its grant to capture somebody else's cross-site Apple callback.
+        val completed = grant.socialAuthenticated && equal(grant.socialResultHash, sha256(result))
+        val verified = grant.verified || (completed && grant.userId?.let { store.activeUser(it) } == true)
+        if (completed) store.save(grant.copy(verified = verified, socialAuthenticated = false, socialProvider = null, socialResultHash = null))
+        return McpOAuthLoginState(verified, grant.verifiedEmail.takeIf { verified }, grant.managementOnly)
     }
 
     @Transactional
@@ -103,7 +147,8 @@ class McpOAuthService(
         val passwordMatches = equal(credential?.passwordHash ?: "0".repeat(64), sha256(password))
         val valid = credential != null && passwordMatches && store.activeUser(credential.userId)
         store.save(grant.copy(userId = if (valid) credential?.userId else null,
-            verified = valid, emailAttempts = grant.emailAttempts + 1, emailCodeHash = null))
+            verified = valid, verifiedEmail = normalized.takeIf { valid }, emailAttempts = grant.emailAttempts + 1, emailCodeHash = null,
+            socialProvider = null, socialStateHash = null, socialNonceHash = null, socialAuthenticated = false, socialResultHash = null))
         return valid
     }
 
@@ -117,7 +162,8 @@ class McpOAuthService(
         val userId = store.uniqueUserByEmail(normalized)
         val code = "%08d".format(random.nextInt(100_000_000))
         // Store indistinguishable state even for unknown addresses. No account creation or linking.
-        store.save(grant.copy(userId = userId, emailCodeHash = sha256("$id:$code"), emailAttempts = 0))
+        store.save(grant.copy(userId = userId, verifiedEmail = normalized, emailCodeHash = sha256("$id:$code"), emailAttempts = 0,
+            socialProvider = null, socialStateHash = null, socialNonceHash = null, socialAuthenticated = false, socialResultHash = null))
         if (userId != null) mail.send(normalized, code, Duration.ofMinutes(10))
         return true
     }

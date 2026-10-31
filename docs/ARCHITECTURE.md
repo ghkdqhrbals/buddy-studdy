@@ -839,3 +839,9 @@ MCP profile reads use profile:read as a separate OAuth scope and retain the
 existing owner-scoped PROFILE_READ use case. Tool/resource discovery and handlers
 share their scope maps. Learning read/write/delete scopes alone do not authorize
 private profile or learning-context reads.
+
+Browser OAuth also supports dedicated Apple/Google web client identities. Exact
+ACTIVE provider/subject matching, signed-token validation and a callback-only
+one-time result plus the initiating browser cookie complete login. The existing
+password/code login, required-terms gate and scoped learning/profile consent remain
+in force. Native iOS login is unchanged.

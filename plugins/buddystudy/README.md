@@ -160,3 +160,43 @@ preparation evidence. They do not prove the new profile consent, current exact
 review cases or the known Korean-answer grading locale defect. Revalidate the
 candidate with the existing dedicated reviewer account; do not use a private
 real-user account. No public submission or publication is claimed by this note.
+
+
+## Apple and Google web login
+
+Configure the existing backend module before showing the social buttons:
+
+| Setting | Value/source |
+| --- | --- |
+| `MCP_OAUTH_GOOGLE_CLIENT_ID` | Google OAuth **Web application** client ID |
+| `MCP_OAUTH_GOOGLE_CLIENT_SECRET` | That web client's server-side secret |
+| `MCP_OAUTH_APPLE_CLIENT_ID` | Apple **Services ID**, grouped with the existing iOS primary App ID |
+
+Register these exact callback URLs in the respective provider consoles:
+
+- Google: `https://api.ghkdqhrbals.org/oauth/social/google/callback`
+- Apple: `https://api.ghkdqhrbals.org/oauth/social/apple/callback`
+
+Apple also requires the backend domain in the Services ID web configuration.
+Keep the native iOS client IDs unchanged. The Google web client must belong to
+an appropriate Google project and its consent screen must permit intended users.
+A matching email never links different provider identities: the signed `sub` and
+provider must match an existing ACTIVE account. New accounts and identity merging
+remain in the app. Apple Services ID grouping must preserve the app's subject IDs.
+
+Google uses a server-side code exchange. Apple uses a signed hybrid `code id_token`
+response with `form_post`, nonce and code-hash verification, so this sign-in-only
+flow does not require persisting Apple refresh tokens or an Apple client secret.
+The callback returns a one-time result to the browser; only that result plus the
+original HttpOnly cookie can complete login. The result is immediately removed
+from the page URL and never stored in local/session storage. Normal ChatGPT OAuth
+code+PKCE and explicit learning-data consent still follow login.
+
+Set the variables and secret in `personal-deploy` using its Backend API workflow
+(as reflected in `docs/deploy-repo-template/deploy-backend.yml`), or supply the same
+settings in the backend environment. Blank settings hide the provider buttons;
+email-code login continues to work. Deploying source does not register clients in
+the Apple or Google consoles. Test with real existing accounts after configuring.
+
+Provider references: [Google OIDC](https://developers.google.com/identity/openid-connect/openid-connect),
+[Apple web sign-in](https://developer.apple.com/documentation/signinwithapple/incorporating-sign-in-with-apple-into-other-platforms).

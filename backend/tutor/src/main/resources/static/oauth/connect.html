@@ -6,19 +6,25 @@
 <link rel="stylesheet" href="/oauth/connect.css"><script src="/oauth/connect.js" defer></script>
 </head>
 <body>
-<div class="page">
+<div class="page" data-stage="choose">
 <header><span class="brand">BuddyStudy</span><button id="language" class="text-button" type="button">English</button></header>
 <main>
 <h1 id="screen-title" tabindex="-1">BuddyStudy 로그인</h1>
-<p id="screen-description" class="description">연결할 계정의 이메일을 입력하세요.</p>
+<p id="screen-description" class="description">로그인하면 내 프로필과 학습 기록을 ChatGPT에서 확인할 수 있습니다.</p>
 <section id="login" aria-labelledby="screen-title">
-<form id="email-form">
+<div id="login-methods" class="login-methods">
+<button id="login-apple" class="provider-button" type="button" hidden><img src="/oauth/assets/apple.svg" alt="" width="22" height="26"><span data-ko="Apple로 로그인" data-en="Sign in with Apple">Apple로 로그인</span></button>
+<button id="login-google" class="provider-button" type="button" hidden><img src="/oauth/assets/google.svg" alt="" width="21" height="22"><span data-ko="Google로 로그인" data-en="Sign in with Google">Google로 로그인</span></button>
+<button id="login-email" class="provider-button email-button" type="button"><span data-ko="이메일로 로그인" data-en="Sign in with email">이메일로 로그인</span></button>
+</div>
+<form id="email-form" hidden>
 <label for="email" data-ko="계정 이메일" data-en="Account email">계정 이메일</label>
 <input id="email" type="email" autocomplete="email" maxlength="254" placeholder="name@example.com" required>
 <p class="hint" data-ko="BuddyStudy 프로필에 표시된 이메일을 사용하세요." data-en="Use the email shown in your BuddyStudy profile.">BuddyStudy 프로필에 표시된 이메일을 사용하세요.</p>
 <div id="password-fields" hidden><label for="password" data-ko="비밀번호" data-en="Password">비밀번호</label><input id="password" type="password" autocomplete="current-password" maxlength="256"><p class="hint" data-ko="이메일로 가입한 계정만 사용할 수 있습니다." data-en="For accounts registered with email and password.">이메일로 가입한 계정만 사용할 수 있습니다.</p></div>
 <button class="primary" type="submit" data-ko="계속" data-en="Continue">계속</button>
 <button id="login-method" class="text-button back" type="button">비밀번호로 로그인</button>
+<button id="back-to-methods" class="text-button back" type="button" data-ko="다른 방법으로 로그인" data-en="Other sign-in options">다른 방법으로 로그인</button>
 </form>
 <form id="code-form" hidden>
 <label for="code" data-ko="8자리 인증번호" data-en="8-digit verification code">8자리 인증번호</label>
@@ -58,7 +64,7 @@
 <div id="connection-list"></div><button id="review-terms" class="text-button back" type="button" data-ko="필수 약관 확인" data-en="Review required terms">필수 약관 확인</button>
 </section>
 <p id="message" role="status" aria-live="polite"></p>
-<footer><a target="_blank" rel="noopener noreferrer" id="connection-notice" href="https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-connection-2026-10-20.html" data-ko="연결 안내" data-en="Connection notice">연결 안내</a><a target="_blank" rel="noopener noreferrer" id="privacy" href="https://ghkdqhrbals.github.io/buddy-studdy/privacy.html" data-ko="개인정보 처리방침" data-en="Privacy policy">개인정보 처리방침</a></footer>
 </main>
+<footer><a target="_blank" rel="noopener noreferrer" id="connection-notice" href="https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-profile-learning-2026-10-31.html" data-ko="연결 안내" data-en="Connection notice">연결 안내</a><a target="_blank" rel="noopener noreferrer" id="privacy" href="https://ghkdqhrbals.github.io/buddy-studdy/privacy.html" data-ko="개인정보 처리방침" data-en="Privacy policy">개인정보 처리방침</a></footer>
 </div>
 </body></html>

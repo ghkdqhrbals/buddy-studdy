@@ -101,13 +101,25 @@ deployment.
   `MCP_OAUTH_ENABLED=false` until the immutable connected-learning disclosure
   is published and the exact ChatGPT callback is registered. Enabling it requires
   both `MCP_SERVER_ENABLED=true` and `MCP_OAUTH_ENABLED=true`; it restricts MCP
-  to `learning:read`, accepts only dedicated OAuth tokens, and hides write and
-  private-profile tools. The backend workflow injects `MCP_OAUTH_ISSUER` from
+  to dedicated OAuth tokens and enforces `learning:read`, `learning:write`,
+  `learning:delete` and `profile:read` separately for the requested capabilities. The backend workflow injects `MCP_OAUTH_ISSUER` from
   `BACKEND_DOMAIN`, a provided public `MCP_OAUTH_CLIENT_ID` (default
   `buddystudy-chatgpt`), and exact comma-separated `MCP_OAUTH_REDIRECT_URIS`.
+  Browser sign-in options additionally use repository variables
+  `MCP_OAUTH_GOOGLE_CLIENT_ID` (Google Web application client) and
+  `MCP_OAUTH_APPLE_CLIENT_ID` (Apple Services ID), plus the repository secret
+  `MCP_OAUTH_GOOGLE_CLIENT_SECRET`. Unconfigured providers stay hidden. Register
+  `https://<BACKEND_DOMAIN>/oauth/social/google/callback` with Google and
+  `https://<BACKEND_DOMAIN>/oauth/social/apple/callback` with Apple. Group the Apple
+  Services ID with the existing iOS primary App ID to preserve provider subjects.
+  These are backend-only environment settings; no monitoring rollout or runtime
+  workflow check is added. Google exchanges codes server-side; Apple verifies its
+  signed hybrid response and code hash. Neither provider's credentials are stored
+  in browser storage or logged. The ChatGPT public-client PKCE flow is unchanged.
   The workflow also sets `MCP_OAUTH_TRUST_PROXY=true` because its gateway
   overwrites `X-Real-IP` and the backend service is not exposed directly; leave
-  this false for directly reachable servers. PKCE S256 replaces a client secret. Never use wildcard callbacks. No
+  this false for directly reachable servers. For the ChatGPT public client, PKCE S256
+  replaces a client secret. Never use wildcard callbacks. No
   monitoring/container/port/SSH changes are needed. The backend Nginx access
   format records `$uri` rather than full request URLs so OAuth codes and state
   cannot leak into access logs. OAuth bodies, queries, cookies and redirect

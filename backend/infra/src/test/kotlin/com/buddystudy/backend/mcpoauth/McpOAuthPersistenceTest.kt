@@ -82,6 +82,19 @@ class McpOAuthPersistenceTest {
     }
 
     @Test
+    fun `social account lookup requires active exact provider subject instead of matching email`(): Unit = runBlocking {
+        val db = DatabaseClient.create(ConnectionFactories.get("r2dbc:h2:mem:///social_${UUID.randomUUID()};DB_CLOSE_DELAY=-1"))
+        db.sql("CREATE TABLE users(id BIGINT PRIMARY KEY, email VARCHAR(254), status VARCHAR(30), provider VARCHAR(30), provider_id VARCHAR(255))").fetch().rowsUpdated().awaitSingle()
+        db.sql("INSERT INTO users VALUES(7, 'same@example.com', 'ACTIVE', 'GOOGLE', 'google-sub'), (8, 'same@example.com', 'ACTIVE', 'APPLE', 'apple-sub'), (9, 'other@example.com', 'WITHDRAWN', 'GOOGLE', 'withdrawn-sub')").fetch().rowsUpdated().awaitSingle()
+        val persistence = McpOAuthPersistenceAdapter(db, JsonMapperProvider.mapper, Mockito.mock(ReactiveStringRedisTemplate::class.java))
+        assertThat(persistence.socialAccount("GOOGLE", "google-sub")).isEqualTo(McpOAuthAccount(7, "same@example.com"))
+        assertThat(persistence.socialAccount("APPLE", "apple-sub")).isEqualTo(McpOAuthAccount(8, "same@example.com"))
+        assertThat(persistence.socialAccount("APPLE", "google-sub")).isNull()
+        assertThat(persistence.socialAccount("GOOGLE", "same@example.com")).isNull()
+        assertThat(persistence.socialAccount("GOOGLE", "withdrawn-sub")).isNull()
+    }
+
+    @Test
     fun `ambiguous provider emails and inactive accounts are rejected`(): Unit = runBlocking {
         val db = DatabaseClient.create(ConnectionFactories.get("r2dbc:h2:mem:///oauth_${UUID.randomUUID()};DB_CLOSE_DELAY=-1"))
         db.sql("CREATE TABLE users(id BIGINT PRIMARY KEY, email VARCHAR(254), status VARCHAR(30), provider VARCHAR(30), password_hash VARCHAR(64))").fetch().rowsUpdated().awaitSingle()

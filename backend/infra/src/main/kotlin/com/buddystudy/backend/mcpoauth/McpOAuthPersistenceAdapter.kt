@@ -14,6 +14,12 @@ class McpOAuthPersistenceAdapter(
     private val mapper: ObjectMapper,
     private val redis: ReactiveStringRedisTemplate,
 ) : McpOAuthStorePort {
+    override suspend fun socialAccount(provider: String, providerId: String): McpOAuthAccount? =
+        database.sql("SELECT id, email FROM users WHERE provider = :provider AND provider_id = :subject AND status = 'ACTIVE' LIMIT 2")
+            .bind("provider", provider).bind("subject", providerId)
+            .map { row, _ -> McpOAuthAccount((row.get("id") as Number).toLong(), row.get("email", String::class.java).orEmpty()) }
+            .all().collectList().awaitSingle().singleOrNull()
+
     override suspend fun insert(grant: McpOAuthGrant) {
         database.sql("INSERT INTO mcp_oauth_grants (id, payload, expires_at) VALUES (:id, :payload, :expires)")
             .bind("id", grant.id).bind("payload", mapper.writeValueAsString(grant))

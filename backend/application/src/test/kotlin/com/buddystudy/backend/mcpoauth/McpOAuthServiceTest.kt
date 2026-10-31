@@ -21,6 +21,83 @@ class McpOAuthServiceTest {
     private val redirect = "https://chatgpt.com/connector_platform_oauth_redirect"
     private val service = McpOAuthService(store, mail, issuer, "client", redirect)
     private val verifier = "v".repeat(43)
+    private class SocialIdentity : McpOAuthSocialIdentityPort {
+        var state = ""; var nonce = ""; var subject = "existing-user"; var valid = true
+        override fun providers() = setOf("apple", "google")
+        override fun authorize(provider: String, state: String, nonce: String): String {
+            this.state = state; this.nonce = nonce
+            return "https://provider.example/authorize"
+        }
+        override suspend fun verify(provider: String, code: String, idToken: String) =
+            if (valid) McpOAuthSocialIdentity(subject, nonce) else null
+    }
+
+    @Test
+    fun `social login uses existing provider identity and requires original browser before consent`(): Unit = runBlocking {
+        for (provider in listOf("apple", "google")) {
+            val identity = SocialIdentity()
+            val social = McpOAuthService(store, mail, issuer, "client", redirect, identity)
+            val start = social.start(request())
+            assertThat(runCatching { social.startSocial(start.id, "wrong-browser", provider) }.isFailure).isTrue()
+            assertThat(social.startSocial(start.id, start.browserSecret, provider)).startsWith("https://provider.example")
+            val saved = store.rows[start.id]!!
+            assertThat(saved.socialStateHash).isNotEqualTo(identity.state)
+            assertThat(saved.socialNonceHash).isNotEqualTo(identity.nonce)
+            val destination = social.socialCallback(provider, identity.state, "code", "id-token", "")
+            assertThat(destination).startsWith("/oauth/connect.html?id=${start.id}&login_result=")
+            val result = query(destination)["login_result"]!!
+            assertThat(store.rows[start.id]!!.socialResultHash).isNotEqualTo(result)
+            assertThat(social.loginState(start.id, start.browserSecret).verified).isFalse()
+            assertThat(social.loginState(start.id, start.browserSecret, "wrong-result").verified).isFalse()
+            assertThat(runCatching { social.consent(start.id, start.browserSecret, true) }.isFailure).isTrue()
+            assertThat(runCatching { social.loginState(start.id, "another-browser", result) }.isFailure).isTrue()
+            assertThat(social.loginState(start.id, start.browserSecret, result)).isEqualTo(McpOAuthLoginState(true, "user@example.com", false))
+            assertThat(runCatching { social.socialCallback(provider, identity.state, "code", "id-token", "") }.isFailure).isTrue()
+            val code = query(social.consent(start.id, start.browserSecret, true))["code"]!!
+            assertThat(social.authenticate(social.token(exchange(code)).tokens!!.access_token)?.userId).isEqualTo(7)
+        }
+        assertThat(sends).isZero()
+    }
+
+    @Test
+    fun `social state provider nonce failure and unknown identity cannot authenticate`(): Unit = runBlocking {
+        val identity = SocialIdentity()
+        val social = McpOAuthService(store, mail, issuer, "client", redirect, identity)
+        val start = social.start(request())
+        social.startSocial(start.id, start.browserSecret, "google")
+        assertThat(runCatching { social.socialCallback("apple", identity.state, "code", "token", "") }.isFailure).isTrue()
+        assertThat(runCatching { social.socialCallback("google", "bad-state", "code", "token", "") }.isFailure).isTrue()
+        for (failure in listOf("nonce", "unknown", "signature", "cancelled")) {
+            identity.valid = true; identity.subject = "existing-user"
+            social.startSocial(start.id, start.browserSecret, "google")
+            when (failure) {
+                "nonce" -> identity.nonce = "wrong-nonce"
+                "unknown" -> identity.subject = "other-provider-subject-with-same-email"
+                "signature" -> identity.valid = false
+            }
+            assertThat(social.socialCallback("google", identity.state, "code", "token", if (failure == "cancelled") "access_denied" else ""))
+                .endsWith("login_error=1")
+            assertThat(social.loginState(start.id, start.browserSecret).verified).isFalse()
+            assertThat(store.rows[start.id]!!.userId).isNull()
+            assertThat(runCatching { social.socialCallback("google", identity.state, "code", "token", "") }.isFailure).isTrue()
+        }
+    }
+
+    @Test
+    fun `social management login cannot authorize client and unavailable providers fail closed`(): Unit = runBlocking {
+        val identity = SocialIdentity()
+        val social = McpOAuthService(store, mail, issuer, "client", redirect, identity)
+        val start = social.startManagement("ip")
+        social.startSocial(start.id, start.browserSecret, "apple")
+        val destination = social.socialCallback("apple", identity.state, "code", "token", "")
+        assertThat(destination).contains("manage=1")
+        assertThat(social.loginState(start.id, start.browserSecret, query(destination)["login_result"]!!)).isEqualTo(McpOAuthLoginState(true, "user@example.com", true))
+        assertThat(runCatching { social.consent(start.id, start.browserSecret, true) }.isFailure).isTrue()
+        val disabled = service.start(request())
+        assertThat(service.loginProviders()).isEmpty()
+        assertThat(runCatching { service.startSocial(disabled.id, disabled.browserSecret, "google") }.isFailure).isTrue()
+    }
+
     private fun request() = McpOAuthRequest("client", redirect, "opaque-state", McpOAuthService.challenge(verifier),
         "$issuer/api/v1/mcp", "learning:read offline_access", "code", "S256")
 
@@ -269,6 +346,7 @@ class McpOAuthServiceTest {
         val parts = field.split('=', limit = 2); parts[0] to URLDecoder.decode(parts[1], Charsets.UTF_8)
     }
     private class MemoryStore : McpOAuthStorePort {
+        override suspend fun socialAccount(provider: String, providerId: String) = if (active && providerId == "existing-user") McpOAuthAccount(7, "user@example.com") else null
         val rows = mutableMapOf<String, McpOAuthGrant>()
         var emailUser: Long? = 7; var active = true; var allowed = true
         override suspend fun insert(grant: McpOAuthGrant) { rows[grant.id] = grant }
