@@ -77,6 +77,52 @@ October 21 recording. This is publication of the demo, not plugin-directory
 approval or publication.
 
 The owner requested creating and deploying this demo before proceeding with a
-public draft; the earlier incomplete-upload question is no longer pending. No
-portal upload, attestations, review submission, approval or plugin publication
-is claimed by this checkpoint.
+public draft; the earlier incomplete-upload question is no longer pending.
+
+## Public submission draft
+
+After verifying the live demo, the author ZIP was uploaded in the intended
+Personal organization with Individual — GYUMIN HWANGBO. The saved public draft
+is `plugin_asdk_app_6ae65ced3f908191ba7ddf9ba790bd25`, associated with
+`asdk_app_6ae65ced3f908191ba7ddf9ba790bd25`. The separate private development
+installation was preserved. No duplicate private installation was created.
+
+The portal showed 0.2.1/Draft, Not submitted and Not published. It imported all
+four URLs, publisher/category, worldwide targeting, KO/JA translations, five
+positive and three negative cases, release notes and the new demo URL. Case
+labels marked “complete” describe field completeness, not test execution.
+
+An automated nonblocking finding asked to remove pricing from the listing.
+Removing the free-tier number from the public long description cleared that
+finding after reupload. The actual allowance remains in the reviewer commerce
+description and server instructions. The saved replacement ZIP SHA-256 is
+`664263267124f85e672a5442980549066ea98c52a58ae5d7441d200d37411513`.
+The only remaining nonblocking metadata finding is that automated privacy-policy
+assessment could not complete; the portal permits additional human review.
+
+The MCP dialog imported the correct endpoint, provided public client, resource
+and all five intended scopes, including `profile:read`. The dedicated reviewer
+signed in. Its consent screen now explicitly includes profile, saved resume and
+interests, unlike the legacy development connection. The owner was asked for
+action-time approval of that new access and for sharing the dedicated credential
+through the portal's private reviewer-access fields. Neither action has been
+performed without the reply. No credential is in the ZIP or public website.
+
+The live origin-root domain-verification URL returned HTTP 404. The portal's
+public verification value is prepared at
+`backend/tutor/src/main/resources/static/.well-known/openai-apps-challenge`.
+It is intentionally public domain proof, not an application secret. Gradle
+`:tutor:processResources` passed and its output contains the exact 43-byte file.
+Backend deployment and the portal's returned domain-verification result must be
+tracked separately; do not call domain proof complete from a local file alone.
+
+Once the learning tools became available in this session, direct read-only
+`get_record` calls for record 198 confirmed the recorded exact Korean answer,
+98/CORRECT and the feedback in both Korean and English. The Korean readback in
+the video matches the tool response. Its awkward “index ... small” wording is a
+localization defect: the English original says the index “helps little.” It is
+not evidence of a different score or a fabricated stored response. Historical
+translation quality and the remaining public-connection cases still need review.
+
+No attestations, review submission, approval or plugin-directory publication
+has been completed.
