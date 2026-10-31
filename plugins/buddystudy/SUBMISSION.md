@@ -36,7 +36,9 @@ A deploy, private installation or locally valid archive does not meet that outco
   [Build/dispatch/watch 41221213007](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41221213007)
   and [backend deployment 41221749954](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41221749954)
   both succeeded. Manual metadata checks still show both social providers and all
-  intended OAuth scopes. Live authenticated review cases remain unverified.
+  intended OAuth scopes. A later authenticated development rehearsal is recorded
+  in [live review evidence](../../docs/plugin-live-review-2026-11-01.md); final
+  public-version checks remain unverified.
 - Actual browser-target video recording was tested with public-page navigation:
   a 24-second AV1 recording was saved outside the repository. This confirms the
   recording mechanism, not the missing current-version review demo.
@@ -45,12 +47,12 @@ A deploy, private installation or locally valid archive does not meet that outco
 
 | Requirement | Current evidence / next action |
 | --- | --- |
-| Dedicated reviewer access | The saved email matches the owner's existing tester account. App Store Connect returns a redacted placeholder for its password, including in its edit dialog. An earlier failed attempt mistakenly used that placeholder; it does not establish that the real credential is invalid. No guessing, reset or credential change was performed. A fresh BuddyStudy email/password login is prepared; the owner was asked to enter the password there or identify its saved location. Never put credentials in this repository or ZIP. |
-| Current five positive cases | Not run for 0.2.1. Old generation/grading evidence does not prove current profile consent or the full current cases. |
+| Dedicated reviewer access | Resolved: the owner supplied the actual reviewer credential; email/password login and existing learning consent succeeded. It is stored only in macOS Keychain (`BuddyStudy reviewer login`), not in this repository or ZIP. No password reset was performed. |
+| Current five positive cases | A current private-host rehearsal displayed the saved tree, Korean question, exact Korean answer/97-point grading, and a linked follow-up. Quota delta, raw tool arguments/feedback fidelity and profile consent remain unverified; run all cases against the final saved public version. |
 | Development profile scope | The legacy development connection opens the learning-management disclosure, rather than the profile disclosure. Verify its requested scopes before the profile case; a successful legacy learning login does not prove profile access. The public author `mcp.json` explicitly requests `profile:read`. |
-| Three negative cases | Not run for this candidate. Old refusal evidence is historical. |
-| Korean answer language | Historical failure: a translated Korean exercise retained an English-answer penalty. Reproduce with the actual host and fix the responsible layer before calling this workflow verified. |
-| Current demo | Existing hosted 72-second video predates profile consent; it is not sufficient evidence for the current candidate. Record real current-host interactions and verify public playback. |
+| Three negative cases | Current-host secret and other-owner requests were refused. The broad-delete case was interrupted and records were subsequently found intact; it is not a passing refusal case. Repeat safely in the final checks. |
+| Korean answer language | A fresh Korean exercise returned 97/CORRECT and the saved original Korean answer. It did not reproduce the English-answer penalty, but historical translated-question/rubric behavior is not established as fixed. |
+| Current demo | Resolved recording dependency: a new real ChatGPT session was recorded, converted to a 155.8-second H.264 MP4 and played locally without media errors. It shows the saved tree, natural Korean answer submission, 98/CORRECT readback and secret-access refusal. It truthfully identifies the legacy connection's missing profile scope. Deploy the new page and verify public playback before updating the package URL. |
 | Public portal draft | None observed in the intended Personal organization/project's Plugins page. Do not create a duplicate private plugin or upload the incomplete candidate as ready. |
 | Domain/auth/scans | Obtain the real challenge and connect/test the exact saved public draft after preparation. Required portal checks are not yet run. |
 | Reviewer credentials | Enter verified dedicated credentials only into secure portal fields after access works. |
@@ -59,10 +61,10 @@ A deploy, private installation or locally valid archive does not meet that outco
 
 ## Resume order
 
-1. Verify the dedicated account can sign in, reconnect the existing development
-   app with the intended scopes, and preserve private credentials off-screen.
-2. Run and record the five positive and three negative cases with sample data;
-   investigate the Korean grading regression using the actual saved results.
+1. Preserve the verified dedicated reviewer credential off-screen. The legacy
+   development app still requests learning scopes only after refresh/reconnect.
+2. Complete the remaining cases with sample data, including profile consent,
+   quota evidence, exact tool-output checks and the interrupted delete refusal.
 3. Record and verify an updated demo, update its real URL in `plugin.json`, then
    rebuild and inspect the complete ZIP.
 4. Upload the public draft, verify imported metadata/publisher/targeting, complete
