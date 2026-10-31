@@ -37,12 +37,14 @@ user account connection, not an administrator account integration.
 - `GET /oauth/authorize`: validate the predefined public client, exact redirect,
   response type, resource, scopes, state and S256 PKCE challenge; issue a
   per-request HttpOnly Secure SameSite=Lax browser cookie.
-- `/oauth/connect.html`: KO/EN email-code login for an existing ACTIVE account,
-  followed by explicit consent to share learning data with the connected ChatGPT.
-  No signup, account linking, raw app token input or administrator login occurs.
-  Unknown and ambiguous emails cannot sign in. Apple relay addresses require
-  configured relay delivery. Request lifetime is 10 minutes, codes have 8 digits
-  and at most five attempts; Redis limits email and network request volume.
+- `/oauth/connect.html`: KO/EN Apple, Google or email login for an existing ACTIVE
+  account, followed by required account terms and separate ChatGPT data consent.
+  Email login accepts an emailed code or the existing email-account password.
+  Social login requires an exact existing provider/subject match; it never links
+  accounts by email. No signup, raw app token input or administrator login occurs.
+  Unknown and ambiguous emails cannot sign in. Email delivery to Apple relay
+  addresses requires relay sender configuration. Request lifetime is 10 minutes,
+  codes have 8 digits and at most five attempts; Redis limits request volume.
 - `POST /oauth/token`: form-encoded authorization-code + S256 exchange or rotating
   refresh. A provided public client uses `token_endpoint_auth_methods_supported:
   ["none"]`; no client secret, DCR or CIMD is used. `resource` is checked on
@@ -56,14 +58,22 @@ user account connection, not an administrator account integration.
   requests cannot authorize a client. Existing app sessions can also use
   `GET /api/v1/me/mcp-connections` and `DELETE /api/v1/me/mcp-connections/{id}`.
 
-Only eight tools are listed: `list_studies`, `get_study`,
-`list_pending_questions`, `get_question_process`, `list_records`, `get_record`,
-`get_topic_stats`, and `get_study_growth`. Only study and recent-record resources
-are listed. Handlers reject OAuth access to all writes, private profile, resume
-and interest context even if the caller knows an unlisted tool/resource name.
-Existing owner-scoped use cases and permission checks still apply. OAuth tokens
-are rejected by ordinary app APIs and app device tokens are rejected by MCP in
-OAuth mode. No question quota is consumed by these reads.
+Discovery and invocation share the central `OAUTH_TOOL_SCOPES` and
+`OAUTH_RESOURCE_SCOPES` mappings in `BuddyStudyMcpAdapter`:
+
+| OAuth scope | Exposed operations |
+| --- | --- |
+| `learning:read` | Owned studies, questions, records, grading progress, voice learning history and topic statistics |
+| `learning:write` | Study/topic creation and edits, suggestions, question generation, answer submission, follow-ups, skips and custom questions |
+| `learning:delete` | Explicitly confirmed owned study or record deletion |
+| `profile:read` | `get_my_context` and `buddystudy://me/context`: private profile, saved resume and interests |
+
+Profile editing, credentials and administrator operations remain unavailable.
+Existing owner-scoped use cases and permissions still apply. Older grants do not
+gain new scopes through refresh; reconnect and explicitly consent when profile or
+write access is needed. OAuth tokens are rejected by ordinary app APIs and app
+device tokens are rejected by MCP in OAuth mode. Reads and study/topic creation
+consume no question quota; generation and grading retain existing account limits.
 
 Grant/code/access/refresh/browser-secret values are random; only their hashes are
 persisted, together with canonical resource, client, owner, scopes, expiry, and
@@ -81,11 +91,12 @@ use a self-only CSP. OAuth bodies, query values, cookies and redirect Locations
 are excluded from application logs; backend Nginx uses a path-only access format.
 MCP bodies remain suppressed and credential headers are redacted.
 
-The immutable optional disclosure uses consent version `learning-read-2026-10-20`
-and has KO/EN/JA copies at `docs/**/chatgpt-connection-2026-10-20.html`. Publish
-these with the existing privacy policy before production activation. This
-optional disclosure does not replace existing required app terms or silently
-agree to them. Disconnecting does not delete already-shared ChatGPT content.
+The immutable profile disclosure uses consent version
+`learning-profile-manage-2026-10-31` and KO/EN/JA copies of
+`chatgpt-profile-learning-2026-10-31.html`. Learning-only grants retain their
+corresponding read or management disclosure. Optional connection consent does not
+replace required app terms or silently agree to them. Disconnecting does not
+delete already-shared ChatGPT content.
 Production rollout, actual SMTP/Apple relay delivery and ChatGPT registration,
 callback/refresh compatibility and public directory review are separate steps;
 a local plugin package is not a published directory listing.
@@ -993,3 +1004,33 @@ verified social callback → required terms → scoped consent without errors.
 The deployment repository's provider env wiring was pushed as `10e4525`; its nine
 backend rollout/notification/configuration tests passed. Console registration and
 production provider activation remain pending until the credentials exist.
+
+## Production web login rollout (2026-11-01)
+
+Google's `BuddyStudy Web Login` web client is configured in project
+`buddystudy-498513`. Its client ID and server-side secret are stored in the
+`personal-deploy` repository variable and Secret respectively. Apple Services ID
+`io.github.ghkdqhrbals.StudyMate.web` has Sign in with Apple enabled, grouped with
+`4CL25TC734.io.github.ghkdqhrbals.StudyMate`, with the exact backend domain and
+Apple callback documented above. Native iOS client settings were preserved.
+No provider secret is committed or included in the browser.
+
+Runtime source `23ad6ce4` was merged as `0b0d66be`; their Git trees are identical.
+The GitHub-hosted [image build](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41196754767)
+and backend-only [production deployment](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41215352047)
+both succeeded. The deployed image is
+`ghcr.io/ghkdqhrbals/buddystudy-backend:oauth-web-20261031-23ad6ce4-jvm`.
+
+Manual checks after deployment, outside GitHub Actions, verified:
+
+- `/oauth/login-options` returns `google` and `apple`.
+- OAuth metadata advertises learning read/write/delete, profile read and offline
+  scopes; the profile-consent notice is selected for a new all-scope request.
+- Live HTML, JavaScript, CSS and both bundled provider icons match merged source.
+- The real Google account chooser and Apple "sign in to BuddyStudy" page open
+  without client or redirect errors. The production chooser has no browser
+  warnings or errors.
+
+Real-account callback completion, token exchange and ChatGPT tool invocation were
+not performed in this checkpoint. Existing connections need fresh profile
+consent; refresh cannot add `profile:read` to an older grant.

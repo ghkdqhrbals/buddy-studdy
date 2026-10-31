@@ -5,7 +5,8 @@ End users connect their **own** BuddyStudy account to create studies and topics,
 ## Backend configuration
 
 Deploy the migration and backend first through the existing Backend API workflow.
-Publish the KO/EN/JA `chatgpt-learning-management-2026-10-21.html` disclosures before enabling.
+Publish the KO/EN/JA `chatgpt-profile-learning-2026-10-31.html` disclosures for
+profile consent; retain the earlier learning-only disclosures for older grants.
 
 ```dotenv
 MCP_SERVER_ENABLED=true
@@ -63,8 +64,8 @@ for ChatGPT; local Codex callbacks are not enabled by this configuration.
 ## End-user flow
 
 1. Connect BuddyStudy in ChatGPT.
-2. Enter the email shown in BuddyStudy's app profile and the emailed 8-digit code, or use the existing password for an email-registered account.
-3. Review any pending required account terms and explicitly agree if desired, then separately allow the requested learning read, write and deletion permissions to ChatGPT.
+2. Choose Apple or Google using the same provider account as the BuddyStudy app, or choose email and enter the saved profile email plus its 8-digit code or existing email-account password.
+3. Review any pending required account terms and explicitly agree if desired, then separately allow the requested learning and profile permissions to ChatGPT.
 4. Ask “Show my recent learning records” or “Which topics should I review?”
 5. Manage or revoke connections at `https://api.ghkdqhrbals.org/oauth/manage`.
 
@@ -73,7 +74,7 @@ requests are rate-limited. Access tokens last at most 15 minutes. Refresh tokens
 rotate and have an absolute 30-day lifetime. Reusing a redeemed refresh token
 revokes the whole connection, including its current access token. Disconnecting
 also revokes server access immediately, but does not delete previously shared
-ChatGPT conversation content. Connection management requires fresh email login.
+ChatGPT conversation content. Connection management requires fresh sign-in.
 
 ## Verification and remaining rollout work
 
