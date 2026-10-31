@@ -13,7 +13,7 @@
       "interface": {
         "displayName": "BuddyStudy",
         "shortDescription": "Study and practice in ChatGPT",
-        "longDescription": "Connect your BuddyStudy account to create studies and topics, request questions, submit your answers, receive saved grading feedback and review topic statistics. Delete selected studies or records only after confirmation. Uses the same account limits and learning records as the iOS app. With separate profile consent, read your own profile, saved resume and interests for learning context. Question generation uses the same monthly account allowance (30 on the free tier); this plugin does not initiate payments.",
+        "longDescription": "Connect your BuddyStudy account to create studies and topics, request questions, submit your answers, receive saved grading feedback and review topic statistics. Delete selected studies or records only after confirmation. Uses the same account limits and learning records as the iOS app. With separate profile consent, read your own profile, saved resume and interests for learning context.",
         "developerName": "GYUMIN HWANGBO",
         "category": "Education & Research",
         "capabilities": [
