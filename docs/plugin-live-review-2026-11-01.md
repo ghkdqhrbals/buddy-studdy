@@ -64,8 +64,17 @@ audio stream. Full-file decoding passed. A contact sheet covering the recording
 was inspected for legibility, actual results and exposed secrets. Chrome loaded
 the local page and played the final MP4 with advancing time and no media error.
 The page provides native controls, inline playback, a real-frame poster, download,
-support and homepage links. Public playback verification remains a separate step
-after the Pages deployment.
+support and homepage links.
+
+[Pages deployment 41243415975](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41243415975)
+succeeded from merged commit `e0574ffb9bf72eaec5c66b9e500d95686d4f97d4`.
+The [public demo page](https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html)
+loaded without a sign-in step. Chrome played the public MP4, sought to 100 seconds
+and advanced beyond 104 seconds with no media error. The final MP4 SHA-256 is
+`f0c8c6710faa416db71e55c8e7e354f29b3d7868eb4f1344bdf12c376d2b25ae`.
+The plugin manifest now references this verified page instead of the historical
+October 21 recording. This is publication of the demo, not plugin-directory
+approval or publication.
 
 The owner requested creating and deploying this demo before proceeding with a
 public draft; the earlier incomplete-upload question is no longer pending. No

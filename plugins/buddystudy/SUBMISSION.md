@@ -52,7 +52,7 @@ A deploy, private installation or locally valid archive does not meet that outco
 | Development profile scope | The legacy development connection opens the learning-management disclosure, rather than the profile disclosure. Verify its requested scopes before the profile case; a successful legacy learning login does not prove profile access. The public author `mcp.json` explicitly requests `profile:read`. |
 | Three negative cases | Current-host secret and other-owner requests were refused. The broad-delete case was interrupted and records were subsequently found intact; it is not a passing refusal case. Repeat safely in the final checks. |
 | Korean answer language | A fresh Korean exercise returned 97/CORRECT and the saved original Korean answer. It did not reproduce the English-answer penalty, but historical translated-question/rubric behavior is not established as fixed. |
-| Current demo | Resolved recording dependency: a new real ChatGPT session was recorded, converted to a 155.8-second H.264 MP4 and played locally without media errors. It shows the saved tree, natural Korean answer submission, 98/CORRECT readback and secret-access refusal. It truthfully identifies the legacy connection's missing profile scope. Deploy the new page and verify public playback before updating the package URL. |
+| Current demo | Complete: [new real ChatGPT recording](https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html), 155.8 seconds, H.264. [Pages deployment 41243415975](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41243415975) succeeded from `e0574ffb`. Public Chrome playback advanced through 104 seconds with no media error, including a seek to the saved-result segment. The page truthfully identifies the legacy connection's missing profile scope. The actual URL is now in `plugin.json`. |
 | Public portal draft | None observed in the intended Personal organization/project's Plugins page. Do not create a duplicate private plugin or upload the incomplete candidate as ready. |
 | Domain/auth/scans | Obtain the real challenge and connect/test the exact saved public draft after preparation. Required portal checks are not yet run. |
 | Reviewer credentials | Enter verified dedicated credentials only into secure portal fields after access works. |
@@ -65,8 +65,8 @@ A deploy, private installation or locally valid archive does not meet that outco
    development app still requests learning scopes only after refresh/reconnect.
 2. Complete the remaining cases with sample data, including profile consent,
    quota evidence, exact tool-output checks and the interrupted delete refusal.
-3. Record and verify an updated demo, update its real URL in `plugin.json`, then
-   rebuild and inspect the complete ZIP.
+3. Rebuild and inspect the ZIP with the now-verified current demo URL. Keep
+   package validation separate from the remaining exact-version portal tests.
 4. Upload the public draft, verify imported metadata/publisher/targeting, complete
    domain and OAuth setup, and run the cases against the exact saved version.
 5. Resolve required scans and obtain the developer's attestations, submit for

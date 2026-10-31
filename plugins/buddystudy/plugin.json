@@ -87,7 +87,7 @@
         },
         "commerce": false,
         "commerce_description": "The plugin does not initiate purchases, collect payment or promote upgrades. Generation uses existing BuddyStudy account entitlements: 30 free questions per monthly period and the same existing paid membership allowance as the iOS app. Quota exhaustion returns a usage-limit error; other features do not consume question-generation allowance.",
-        "demo_recording_url": "https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-10-21.html"
+        "demo_recording_url": "https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html"
       },
       "publication": {
         "release_notes": "Adds separately consented profile and saved learning-context reads without changing existing learning read/write/delete scope boundaries. Makes the plugin available in all supported countries and clarifies the shared monthly question allowance and structured quota-error handling.",
