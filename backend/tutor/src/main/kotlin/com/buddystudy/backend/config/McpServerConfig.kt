@@ -5,6 +5,7 @@ import com.buddystudy.backend.common.adapter.inbound.web.RequestLoggingFilter
 import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeLogger
 import com.buddystudy.backend.mcp.adapter.inbound.McpLoggingServerTransport
+import com.buddystudy.backend.mcp.adapter.inbound.McpScopedServerTransport
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpAdapter
 import org.springframework.beans.factory.annotation.Value
@@ -78,12 +79,12 @@ class McpServerConfig(
         properties: BuddyStudyProperties,
         exchangeLogger: McpExchangeLogger,
         objectMapper: ObjectMapper,
-    ): McpStatelessAsyncServer = McpServer.async(McpLoggingServerTransport(
+    ): McpStatelessAsyncServer = McpServer.async(McpScopedServerTransport(McpLoggingServerTransport(
         delegate = transport,
         exchangeLogger = exchangeLogger,
         objectMapper = objectMapper,
         resourceNames = mcp.resources().associate { it.resource().uri() to it.resource().name() },
-    ))
+    )))
         .jsonMapper(jsonMapper)
         .jsonSchemaValidator(McpJsonSchemaValidatorProvider.create())
         .serverInfo("buddystudy-mcp", "0.1.0")

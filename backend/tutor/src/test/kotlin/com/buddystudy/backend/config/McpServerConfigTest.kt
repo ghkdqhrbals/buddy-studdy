@@ -385,6 +385,72 @@ class McpServerConfigTest {
         } finally { fixture.server.close() }
     }
 
+    @Test
+    fun `OAuth discovery follows each request grant without caching another grants tools`() {
+        val useCase = Proxy.newProxyInstance(
+            BuddyStudyMcpUseCase::class.java.classLoader, arrayOf(BuddyStudyMcpUseCase::class.java),
+        ) { _, method, _ -> error("Discovery must not execute ${method.name}") } as BuddyStudyMcpUseCase
+        val fixture = fixture(
+            BuddyStudyMcpAdapter(useCase, JsonMapperProvider.mapper),
+            config = McpServerConfig(true),
+            principalProvider = { exchange -> Principal(7, "mcp:catalog", 0, false,
+                oauthScopes = exchange.request.headers.getFirst("X-Test-Scopes").orEmpty()
+                    .split(',').filter(String::isNotBlank).toSet()) },
+        )
+        try {
+            // One server serves alternating grants; a broader grant must never widen the next one.
+            val cases = listOf(
+                Triple("learning:read", 15, 2),
+                Triple("learning:read,learning:write,learning:delete,profile:read", 28, 3),
+                Triple("learning:read", 15, 2),
+                Triple("learning:read,profile:read", 16, 3),
+                Triple("learning:read,learning:write", 25, 2),
+                Triple("", 0, 0),
+            )
+            cases.forEach { (scopes, toolCount, resourceCount) ->
+                fun discover(method: String, field: String): List<String> {
+                    val body = fixture.client.post().uri(BuddyStudyMcpPort.ENDPOINT).mcpHeaders()
+                        .header("X-Test-Scopes", scopes)
+                        .bodyValue(mapOf("jsonrpc" to "2.0", "id" to 1, "method" to method))
+                        .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+                    return JsonMapperProvider.mapper.readTree(body).path("result").path(field)
+                        .map { it.path(if (field == "tools") "name" else "uri").asText() }
+                }
+                val tools = discover("tools/list", "tools")
+                assertThat(tools).`as`("tools for [$scopes]").hasSize(toolCount)
+                assertThat("get_my_context" in tools).isEqualTo("profile:read" in scopes)
+                assertThat("create_root_study" in tools).isEqualTo("learning:write" in scopes)
+                assertThat("delete_record" in tools).isEqualTo("learning:delete" in scopes)
+                assertThat(tools).doesNotContain("update_my_learning_context")
+                val resources = discover("resources/list", "resources")
+                assertThat(resources).`as`("resources for [$scopes]").hasSize(resourceCount)
+                assertThat("buddystudy://me/context" in resources).isEqualTo("profile:read" in scopes)
+            }
+            fixture.client.post().uri(BuddyStudyMcpPort.ENDPOINT).mcpHeaders()
+                .header("X-Test-Scopes", "learning:read")
+                .bodyValue(mapOf("jsonrpc" to "2.0", "id" to 2, "method" to "tools/call",
+                    "params" to mapOf("name" to "get_my_context", "arguments" to emptyMap<String, Any>())))
+                .exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$.result.isError").isEqualTo(true)
+                .jsonPath("$.result.structuredContent.error.status").isEqualTo(403)
+        } finally { fixture.server.close() }
+    }
+
+    @Test
+    fun `native session discovery keeps its existing profile editing contract`() {
+        val useCase = Proxy.newProxyInstance(
+            BuddyStudyMcpUseCase::class.java.classLoader, arrayOf(BuddyStudyMcpUseCase::class.java),
+        ) { _, method, _ -> error("Discovery must not execute ${method.name}") } as BuddyStudyMcpUseCase
+        val fixture = fixture(BuddyStudyMcpAdapter(useCase, JsonMapperProvider.mapper),
+            principal = Principal(7, "native-session", 11, false))
+        try {
+            fixture.client.post().uri(BuddyStudyMcpPort.ENDPOINT).mcpHeaders()
+                .bodyValue(mapOf("jsonrpc" to "2.0", "id" to 1, "method" to "tools/list"))
+                .exchange().expectStatus().isOk.expectBody()
+                .jsonPath("$.result.tools[?(@.name == 'update_my_learning_context')]").isNotEmpty
+        } finally { fixture.server.close() }
+    }
+
     private fun toolCall(arguments: Map<String, Any>) = mapOf(
         "jsonrpc" to "2.0", "id" to 1, "method" to "tools/call",
         "params" to mapOf("name" to "schema_probe", "arguments" to arguments),
@@ -422,6 +488,7 @@ class McpServerConfigTest {
         principal: Principal? = null,
         parentRequestId: String? = null,
         config: McpServerConfig = this.config,
+        principalProvider: (org.springframework.web.server.ServerWebExchange) -> Principal? = { principal },
     ): Fixture {
         val properties = BuddyStudyProperties().apply {
             this.mcp.allowedHosts = listOf("localhost", "localhost:*")
@@ -440,7 +507,7 @@ class McpServerConfigTest {
         return Fixture(
             client = WebTestClient.bindToRouterFunction(config.buddyStudyMcpRouterFunction(transport))
                 .webFilter<WebTestClient.RouterFunctionSpec>(WebFilter { exchange, chain ->
-                    principal?.let { exchange.attributes[BearerTokenFilter.AUTHENTICATED_PRINCIPAL_ATTRIBUTE] = it }
+                    principalProvider(exchange)?.let { exchange.attributes[BearerTokenFilter.AUTHENTICATED_PRINCIPAL_ATTRIBUTE] = it }
                     parentRequestId?.let { exchange.attributes[RequestLoggingFilter.REQUEST_ID_ATTRIBUTE] = it }
                     chain.filter(exchange)
                 }).build(),

@@ -24,6 +24,14 @@ A deploy, private installation or locally valid archive does not meet that outco
   Support describes Apple/Google/email sign-in and fresh profile consent. Local
   desktop and 390px mobile checks found no browser errors or horizontal overflow;
   homepage → support → connection notice navigation and local links passed.
+- [Pages deployment 41220555706](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41220555706)
+  succeeded. Live KO/EN/JA homepages and support show the new content; browser
+  navigation followed the privacy/terms aliases to their actual policy documents.
+  The portal offers the saved Individual — GYUMIN HWANGBO publisher identity.
+- Further source validation reproduced the per-grant discovery mismatch (28 tools
+  listed for a 15-tool read-only grant) and corrected it without widening access.
+  All 72 targeted transport/security/adapter/logging tests passed; direct calls
+  outside the grant remain denied. Backend rollout is tracked separately.
 
 ## Live review evidence still required
 

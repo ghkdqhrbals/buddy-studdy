@@ -59,7 +59,10 @@ user account connection, not an administrator account integration.
   `GET /api/v1/me/mcp-connections` and `DELETE /api/v1/me/mcp-connections/{id}`.
 
 Discovery and invocation share the central `OAUTH_TOOL_SCOPES` and
-`OAUTH_RESOURCE_SCOPES` mappings in `BuddyStudyMcpAdapter`:
+`OAUTH_RESOURCE_SCOPES` mappings in `BuddyStudyMcpAdapter`. HTTP `tools/list` and
+`resources/list` are filtered by the current request's verified OAuth scopes,
+before the response is logged. Discovery never caches a broader grant's catalog
+for another request; native device-session discovery retains its existing tools.
 
 | OAuth scope | Exposed operations |
 | --- | --- |
@@ -1034,3 +1037,17 @@ Manual checks after deployment, outside GitHub Actions, verified:
 Real-account callback completion, token exchange and ChatGPT tool invocation were
 not performed in this checkpoint. Existing connections need fresh profile
 consent; refresh cannot add `profile:read` to an older grant.
+
+## Per-grant discovery regression (2026-11-01)
+
+An HTTP regression test reproduced 28 advertised tools for a `learning:read`-only
+grant, although only 15 were executable. The registration-time OAuth allowlist
+did not account for the individual request's consent. `McpScopedServerTransport`
+now filters tool/resource list results using the same scope maps as invocation.
+The filtering runs before exchange logging, retains SDK cursors and metadata,
+and stores no per-user catalog. Native session discovery is unchanged.
+
+Seventy-two targeted HTTP transport, security, adapter and logging tests passed.
+The new coverage alternates read-only, all-scope, read/profile, read/write and
+empty grants on one server, verifies resource discovery too, confirms an unlisted
+profile call still returns 403, and preserves native profile-edit discovery.
