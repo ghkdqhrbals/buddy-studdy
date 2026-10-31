@@ -28,11 +28,15 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 ## Optional ChatGPT Account Connection
 
 Registered users can connect BuddyStudy to ChatGPT through a learning MCP plugin.
-The browser authenticates the existing account with an emailed one-time code or the existing password for an email-registered account,
-then requests explicit learning-data disclosure consent. The connection exposes
-only the account's study tree, questions, answers, grading feedback and topic
-statistics; it excludes administrator data, API keys, resumes and private profile
-context. With separate learning:write and learning:delete consent it also creates and updates studies/topics, generates questions and follow-ups, submits exact answers for grading, saves custom questions and deletes confirmed owned studies or records. Existing account limits apply to generation and grading; study/topic creation does not consume question quota. Existing read-only grants require fresh consent before writes. OAuth access tokens are separate from iOS sessions, expire within 15 minutes,
+The browser authenticates an existing account with Apple or Google, an emailed
+one-time code, or the existing password for an email-registered account, then
+requests explicit data-disclosure consent. Social sign-in must match the saved
+provider identity; matching email addresses never merge accounts. Learning
+consent exposes the account's study tree, questions, answers, grading feedback
+and topic statistics. Separate `profile:read` consent permits read-only access
+to the connected account's profile, saved resume and interests; existing learning
+grants cannot acquire that scope through refresh. Administrator data, API keys,
+passwords and profile edits remain excluded. With separate learning:write and learning:delete consent it also creates and updates studies/topics, generates questions and follow-ups, submits exact answers for grading, saves custom questions and deletes confirmed owned studies or records. Existing account limits apply to generation and grading; study/topic creation does not consume question quota. Existing read-only grants require fresh consent before writes. OAuth access tokens are separate from iOS sessions, expire within 15 minutes,
 and can refresh for at most 30 days. Users can revoke connections from the
 standalone connection-management page after fresh verification. Expiration,
 withdrawal and account deletion stop future access; previously shared ChatGPT
