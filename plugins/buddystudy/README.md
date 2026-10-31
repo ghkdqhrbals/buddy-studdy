@@ -160,11 +160,16 @@ existing question allowance applies (30 on the free monthly tier); the plugin
 neither promotes upgrades nor initiates payment. The profile review case replaces
 the destructive demo case so no new live deletion is required for that case.
 
-The prior hosted demo and live generation/grading evidence remain historical
-preparation evidence. They do not prove the new profile consent, current exact
-review cases or the known Korean-answer grading locale defect. Revalidate the
-candidate with the existing dedicated reviewer account; do not use a private
-real-user account. No public submission or publication is claimed by this note.
+The [November 1 demo](https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html)
+is a real current-host recording of saved-tree reads, a natural Korean answer,
+98/CORRECT grading, unchanged-answer readback and a secret-access refusal.
+Its accompanying page explicitly identifies the legacy connection's missing
+profile consent. Public playback and seeking were verified after the successful
+Pages deployment. The fresh Korean exercises did not reproduce the historical
+English-answer penalty; this does not establish a fix for old translated records.
+Revalidate every case against the final saved public connection using the
+dedicated reviewer account. No public plugin submission or publication is
+claimed by this note.
 
 
 ## Apple and Google web login
