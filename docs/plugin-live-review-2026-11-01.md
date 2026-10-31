@@ -45,14 +45,29 @@ in the final checks.
 
 ## Recording and submission
 
-The previously tested public-page recording demonstrates recording capability
-only; it is not a product demo. Starting a new target recording now returns
-`Raw CDP is unavailable while Browser Use is resolving a paused document response`.
-No new demo recording was created, and no screenshot sequence is presented as
-video. The historical demo URL remains unchanged until a real replacement has
-been recorded, played back and hosted.
+The first attempt at a new target recording was blocked by the browser's
+paused-document state. On the owner's next turn, the same recording capability
+worked. A real, continuous Chrome target recording was saved outside the
+repository. The MP4 trims only the opening navigation and preserves
+the recorded interaction order and speed; it is not a screenshot montage.
 
-The owner has been asked whether to upload the existing candidate explicitly as
-an incomplete public draft so its separately scoped profile connection can be
-tested before the replacement demo is available. No upload, attestations, review
-submission, approval or publication is claimed by this checkpoint.
+The new walkthrough reads the saved tree and pending follow-up, submits only a
+natural Korean answer, displays 98/CORRECT, re-reads that exact answer and the
+same saved result, and refuses a password/API-key request. No new question or
+regrading was requested during the readback. No password, token, email login or
+authentication screen is recorded. The existing connection's missing profile
+scope remains explicit in the accompanying page, rather than claiming a
+successful profile read.
+
+Local verification: H.264 MP4, 1196 × 960, 155.823 seconds, 1,367,226 bytes, no
+audio stream. Full-file decoding passed. A contact sheet covering the recording
+was inspected for legibility, actual results and exposed secrets. Chrome loaded
+the local page and played the final MP4 with advancing time and no media error.
+The page provides native controls, inline playback, a real-frame poster, download,
+support and homepage links. Public playback verification remains a separate step
+after the Pages deployment.
+
+The owner requested creating and deploying this demo before proceeding with a
+public draft; the earlier incomplete-upload question is no longer pending. No
+portal upload, attestations, review submission, approval or plugin publication
+is claimed by this checkpoint.
