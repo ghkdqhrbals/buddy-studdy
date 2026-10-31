@@ -32,13 +32,22 @@ A deploy, private installation or locally valid archive does not meet that outco
   listed for a 15-tool read-only grant) and corrected it without widening access.
   All 72 targeted transport/security/adapter/logging tests passed; direct calls
   outside the grant remain denied. Backend rollout is tracked separately.
+- Per-grant discovery is deployed from `c2f3280e` (feature `1f2b8f3e`).
+  [Build/dispatch/watch 41221213007](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41221213007)
+  and [backend deployment 41221749954](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41221749954)
+  both succeeded. Manual metadata checks still show both social providers and all
+  intended OAuth scopes. Live authenticated review cases remain unverified.
+- Actual browser-target video recording was tested with public-page navigation:
+  a 24-second AV1 recording was saved outside the repository. This confirms the
+  recording mechanism, not the missing current-version review demo.
 
 ## Live review evidence still required
 
 | Requirement | Current evidence / next action |
 | --- | --- |
-| Dedicated reviewer access | Blocked: one password login using the existing App Store Connect review fields was rejected. No guessing, account reset or credential changes were attempted. The owner was asked to sign in to the prepared BuddyStudy browser page. Never put credentials in this repository or ZIP. |
+| Dedicated reviewer access | The saved email matches the owner's existing tester account. App Store Connect returns a redacted placeholder for its password, including in its edit dialog. An earlier failed attempt mistakenly used that placeholder; it does not establish that the real credential is invalid. No guessing, reset or credential change was performed. A fresh BuddyStudy email/password login is prepared; the owner was asked to enter the password there or identify its saved location. Never put credentials in this repository or ZIP. |
 | Current five positive cases | Not run for 0.2.1. Old generation/grading evidence does not prove current profile consent or the full current cases. |
+| Development profile scope | The legacy development connection opens the learning-management disclosure, rather than the profile disclosure. Verify its requested scopes before the profile case; a successful legacy learning login does not prove profile access. The public author `mcp.json` explicitly requests `profile:read`. |
 | Three negative cases | Not run for this candidate. Old refusal evidence is historical. |
 | Korean answer language | Historical failure: a translated Korean exercise retained an English-answer penalty. Reproduce with the actual host and fix the responsible layer before calling this workflow verified. |
 | Current demo | Existing hosted 72-second video predates profile consent; it is not sufficient evidence for the current candidate. Record real current-host interactions and verify public playback. |

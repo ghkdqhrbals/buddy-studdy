@@ -1051,3 +1051,12 @@ Seventy-two targeted HTTP transport, security, adapter and logging tests passed.
 The new coverage alternates read-only, all-scope, read/profile, read/write and
 empty grants on one server, verifies resource discovery too, confirms an unlisted
 profile call still returns 403, and preserves native profile-edit discovery.
+
+Deployment receipt: feature `1f2b8f3e` merged as `c2f3280e`. GitHub-hosted
+[build/dispatch/watch 41221213007](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41221213007)
+and backend-only [deployment 41221749954](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41221749954)
+succeeded with image
+`ghcr.io/ghkdqhrbals/buddystudy-backend:mcp-scopes-20261101-1f2b8f3e-jvm`.
+Post-deploy manual metadata checks retained the intended scopes and both social
+providers. Real authenticated ChatGPT review cases are still separate pending
+evidence; fixture tests and deployment success do not establish those outcomes.
