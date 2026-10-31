@@ -116,6 +116,17 @@ It is intentionally public domain proof, not an application secret. Gradle
 Backend deployment and the portal's returned domain-verification result must be
 tracked separately; do not call domain proof complete from a local file alone.
 
+Domain proof is now complete. [Build/dispatch/watch 41244161423](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41244161423)
+and [backend deployment 41244673073](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41244673073)
+both succeeded from `bf26b9829390e59e62faa48599c5cc6ba1958ba0`, deploying
+`ghcr.io/ghkdqhrbals/buddystudy-backend:mcp-domain-20261101-bf26b982-jvm`.
+A manual request after deployment returned HTTP 200 with the exact 43-byte
+challenge. The portal's subsequent **Verify Domain** returned **Domain verified**.
+The hosted image was built on GitHub's runner; the deploy-only backend workflow
+pulled and applied it. No production SSH or Actions runtime health checks were
+used. Profile authorization, tool discovery/scans and reviewer credential fields
+remain pending; domain verification does not establish any of those results.
+
 Once the learning tools became available in this session, direct read-only
 `get_record` calls for record 198 confirmed the recorded exact Korean answer,
 98/CORRECT and the feedback in both Korean and English. The Korean readback in

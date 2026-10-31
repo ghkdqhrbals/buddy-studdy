@@ -54,20 +54,19 @@ A deploy, private installation or locally valid archive does not meet that outco
 | Korean answer language | A fresh Korean exercise returned 97/CORRECT and the saved original Korean answer. It did not reproduce the English-answer penalty, but historical translated-question/rubric behavior is not established as fixed. |
 | Current demo | Complete: [new real ChatGPT recording](https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html), 155.8 seconds, H.264. [Pages deployment 41243415975](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41243415975) succeeded from `e0574ffb`. Public Chrome playback advanced through 104 seconds with no media error, including a seek to the saved-result segment. The page truthfully identifies the legacy connection's missing profile scope. The actual URL is now in `plugin.json`. |
 | Public portal draft | Uploaded 0.2.1 in the intended Personal organization with Individual — GYUMIN HWANGBO. Public draft `plugin_asdk_app_6ae65ced3f908191ba7ddf9ba790bd25` preserves the separate private installation. Publisher, four URLs, all countries, KO/JA translations, 5/3 cases and new demo URL were read back. A listing-price finding was corrected and cleared by reupload. Remaining privacy-assessment finding is explicitly nonblocking. |
-| Domain/auth/scans | The public MCP dialog imported all five intended scopes. The signed-in reviewer reached the actual profile/resume/interests consent screen; new access awaits owner approval. The real domain challenge returned HTTP 404; its public static resource is prepared and passed resource packaging. Track backend deployment, returned verification and exact-version cases separately. |
+| Domain/auth/scans | Domain complete: [image build/dispatch/watch 41244161423](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41244161423) and [backend deployment 41244673073](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41244673073) succeeded from `bf26b982`. Manual HTTP returned the exact 43-byte proof and the portal returned **Domain verified**. The public MCP dialog imported all five intended scopes; the signed-in reviewer reached the profile/resume/interests consent screen. New access awaits owner approval. Discovery/scans and exact-version cases remain separate, unverified requirements. |
 | Reviewer credentials | Login works. Private portal fields remain empty pending the owner's explicit approval to provide the dedicated credential to OpenAI reviewers. Never put it in the ZIP or listing. |
 | Attestations | The authorized developer must complete the current legal/policy attestations. Do not infer or accept them on the developer's behalf. |
 | Review and publication | Not submitted, approved or published. Verify each returned state separately; publish only the approved release and confirm its directory listing. |
 
 ## Resume order
 
-1. Finish the prepared domain-proof deployment and verify the portal's result.
-2. With the owner's reply, complete the prepared profile grant and private
+1. With the owner's reply, complete the prepared profile grant and private
    reviewer-credential fields. Preserve credentials off-screen.
-3. Run the remaining exact-version cases with sample data, including profile,
+2. Run the remaining exact-version cases with sample data, including profile,
    quota evidence and the interrupted delete refusal. Package validation and
    the development rehearsal do not replace these final checks.
-4. Resolve required scans and obtain the developer's attestations, submit for
+3. Resolve required scans and obtain the developer's attestations, submit for
    review, track its real status, and publish after approval.
 
 References: [submission guide](https://developers.openai.com/plugins/deploy/submission),
