@@ -13,7 +13,7 @@ const text = (ko, en) => language === 'ko' ? ko : en;
 function translate() {
   document.documentElement.lang = language;
   const prefix = language === 'ko' ? '' : 'en/';
-  document.getElementById('connection-notice').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}${grantedScopes.has('learning:write') || grantedScopes.has('learning:delete') ? 'chatgpt-learning-management-2026-10-21.html' : 'chatgpt-connection-2026-10-20.html'}`;
+  document.getElementById('connection-notice').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}${grantedScopes.has('profile:read') ? 'chatgpt-profile-learning-2026-10-31.html' : grantedScopes.has('learning:write') || grantedScopes.has('learning:delete') ? 'chatgpt-learning-management-2026-10-21.html' : 'chatgpt-connection-2026-10-20.html'}`;
   document.getElementById('privacy').href = `https://ghkdqhrbals.github.io/buddy-studdy/${prefix}privacy.html`;
   document.querySelectorAll('[data-ko]').forEach(node => { node.textContent = node.dataset[language]; });
   document.querySelectorAll('[data-scope]').forEach(node => { node.hidden = !grantedScopes.has(node.dataset.scope); });

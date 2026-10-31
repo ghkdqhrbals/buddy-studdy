@@ -198,3 +198,12 @@ notices before activation. Only owned learning data is shared in this mode;
 private resume/interests and profile-context tools are excluded. OAuth bodies,
 queries, cookies and redirect Locations must not enter application or gateway logs.
 Disconnecting revokes future access, not previously shared ChatGPT content.
+
+
+The 2026-10-31 public candidate adds separate profile:read consent under
+learning-profile-manage-2026-10-31. Only that scope permits retrieval of the
+connected account profile (including email), saved resume and interests. Existing
+learning read/write/delete grants cannot acquire it by token refresh. Profile
+response bodies are omitted from MCP exchange logs, while status/timing and
+operation metadata remain. Existing immutable notices and normal account-terms
+acceptance remain separate from the optional connection permission.

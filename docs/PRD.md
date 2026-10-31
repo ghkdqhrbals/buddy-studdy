@@ -451,3 +451,8 @@ card directly. Viewing a grade never resubmits an answer or advances the lesson.
 - 질문은 400자 이내의 한 가지 중심 문제로 유지한다. 언어 학습은 답변에 사용할 언어를 명시하며, 비개발 주제에 개발 용어를 강제하지 않는다.
 - 최초·보완 생성 채점표 모두 질문에서 요구한 내용만 평가한다. 짧아도 정확하고 근거가 충분한 답은 만점을 받을 수 있고, 주어진 조건에 맞는 대안도 인정한다.
 - 음성 설명도 같은 실무 맥락을 유지하며 저장된 문제를 임의로 바꾸거나 새로운 즉석 문제로 대체하지 않는다.
+
+The optional public plugin may also read the connected account profile, saved
+resume and interests after separate profile:read consent. This scope cannot be
+added to earlier learning grants through refresh, and never exposes credentials
+or permits profile editing.

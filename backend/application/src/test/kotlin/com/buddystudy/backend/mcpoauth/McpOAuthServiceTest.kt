@@ -86,6 +86,24 @@ class McpOAuthServiceTest {
     }
 
     @Test
+    fun `profile scope requires fresh consent and cannot be added by refresh`(): Unit = runBlocking {
+        val scopes = "learning:read profile:read offline_access"
+        val start = service.start(request().copy(scope = scopes))
+        service.sendCode(start.id, start.browserSecret, "user@example.com", "ip")
+        service.verifyCode(start.id, start.browserSecret, sentCode)
+        val code = query(service.consent(start.id, start.browserSecret, true))["code"]!!
+        val tokens = service.token(exchange(code)).tokens!!
+        assertThat(store.rows[start.id]!!.consentVersion).isEqualTo("learning-profile-manage-2026-10-31")
+        assertThat(service.authenticate(tokens.access_token)!!.oauthScopes).contains("profile:read")
+        val (_, oldCode) = authorize()
+        val old = service.token(exchange(oldCode)).tokens!!
+        val expanded = service.token(mapOf("grant_type" to "refresh_token", "client_id" to "client",
+            "resource" to "$issuer/api/v1/mcp", "refresh_token" to old.refresh_token!!, "scope" to scopes))
+        assertThat(expanded.error).isEqualTo("invalid_scope")
+        assertThat(service.authenticate(old.access_token)!!.oauthScopes).doesNotContain("profile:read")
+    }
+
+    @Test
     fun `login consent and code exchange issue owner-scoped independent tokens`(): Unit = runBlocking {
         val start = service.start(request())
         assertThat(service.sendCode(start.id, start.browserSecret, "USER@example.com", "ip")).isTrue()

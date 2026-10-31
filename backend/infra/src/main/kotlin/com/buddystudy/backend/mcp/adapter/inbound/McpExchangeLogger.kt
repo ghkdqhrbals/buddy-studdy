@@ -122,6 +122,8 @@ class McpExchangeLogger(private val objectMapper: ObjectMapper) {
                 }
                 val terminalBody = if (error != null || isCancelled || result == null) {
                     mapOf("error" to mapOf("code" to code, "status" to status))
+                } else if (target in setOf("get_my_context", "my-buddystudy-context", "buddystudy://me/context")) {
+                    mapOf("redacted" to true)
                 } else result.body
                 val payload = linkedMapOf<String, Any?>(
                     "requestId" to requestId,
