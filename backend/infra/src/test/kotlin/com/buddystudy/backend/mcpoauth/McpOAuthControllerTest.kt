@@ -121,6 +121,37 @@ class McpOAuthControllerTest {
     }
 
     @Test
+    fun `social start and login state require the original same origin browser cookie`(): Unit = runBlocking {
+        Mockito.`when`(port.startSocial(id, "secret", "google")).thenReturn("https://accounts.google.com/o/oauth2/v2/auth?state=opaque")
+        client.post().uri("/oauth/social/start").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")
+            .contentType(MediaType.APPLICATION_JSON).bodyValue(mapOf("id" to id, "provider" to "google"))
+            .exchange().expectStatus().isBadRequest
+        client.post().uri("/oauth/social/start").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id, "provider" to "google")).exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.redirect").isEqualTo("https://accounts.google.com/o/oauth2/v2/auth?state=opaque")
+        Mockito.`when`(port.loginState(id, "secret")).thenReturn(McpOAuthLoginState(true, "user@example.com", false))
+        client.post().uri("/oauth/login-state").header(HttpHeaders.ORIGIN, issuer).header("X-OAuth-Intent", "connect")
+            .cookie("__Secure-bs-oauth-$id", "secret").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("id" to id)).exchange().expectStatus().isOk
+            .expectBody().jsonPath("$.email").isEqualTo("user@example.com")
+    }
+
+    @Test
+    fun `provider callbacks accept Google query and Apple cross site form post without exposing tokens`(): Unit = runBlocking {
+        val destination = "/oauth/connect.html?id=$id&signed_in=1"
+        Mockito.`when`(port.socialCallback("google", "opaque", "google-code", "", "")).thenReturn(destination)
+        client.get().uri("/oauth/social/google/callback?state=opaque&code=google-code").exchange()
+            .expectStatus().isSeeOther.expectHeader().valueEquals("Location", destination)
+        Mockito.`when`(port.socialCallback("apple", "opaque", "apple-code", "signed-token", "")).thenReturn(destination)
+        client.post().uri("/oauth/social/apple/callback").header(HttpHeaders.ORIGIN, "https://appleid.apple.com")
+            .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+            .bodyValue("state=opaque&code=apple-code&id_token=signed-token").exchange()
+            .expectStatus().isSeeOther.expectHeader().valueEquals("Location", destination)
+            .expectHeader().valueMatches("Content-Security-Policy", ".*img-src 'self'.*")
+    }
+
+    @Test
     fun `authorization only uses server generated browser cookie and local login destination`(): Unit = runBlocking {
         val parameters = mapOf("client_id" to "client")
         Mockito.`when`(port.start(parameters, "unknown")).thenReturn(McpOAuthStart(id, "secret"))

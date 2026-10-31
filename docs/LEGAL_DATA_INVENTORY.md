@@ -207,3 +207,8 @@ learning read/write/delete grants cannot acquire it by token refresh. Profile
 response bodies are omitted from MCP exchange logs, while status/timing and
 operation metadata remain. Existing immutable notices and normal account-terms
 acceptance remain separate from the optional connection permission.
+
+Optional Apple/Google browser login stores only hashes of state, nonce and the
+one-time callback result in existing expiring OAuth grants. Provider tokens are
+transient and excluded from API/history logs and browser storage. Account matching
+uses provider and subject; no identities are merged by email.

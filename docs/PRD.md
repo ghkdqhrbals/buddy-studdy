@@ -456,3 +456,8 @@ The optional public plugin may also read the connected account profile, saved
 resume and interests after separate profile:read consent. This scope cannot be
 added to earlier learning grants through refresh, and never exposes credentials
 or permits profile editing.
+
+The ChatGPT browser login starts with compact Apple, Google and email options.
+Configured social providers resolve the existing ACTIVE account by provider and
+subject; unknown identities must register in the app. Email password/code options,
+required terms and explicit requested-scope consent remain available.

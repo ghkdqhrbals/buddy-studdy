@@ -1,3 +1,94 @@
+# Production integration verification · 2026-10-31
+
+80 focused server tests passed after integration. The compact chooser and social
+authentication were integrated onto production
+`76cfae70`, preserving the current password login, required-terms stage and the
+separately consented learning/profile scopes. The older read-only branch was not
+deployed over newer production features. Local browser fixture verification at
+`http://127.0.0.1:8797` confirms social callback → required terms → exact scoped
+consent and one-time-result removal from the URL, with no console errors.
+Evidence: `/Users/ghkdqhrbals/.codex/visualizations/2026/10/31/01a19155-eeb3-7af0-8a26-9142c1a18373/integrated-oauth-scoped-consent.png`.
+
+final result: passed
+
+---
+
+# BuddyStudy OAuth login design QA · 2026-10-31
+
+final result: passed
+
+## Source and rendered evidence
+
+- Source: `/var/folders/5q/l5nc5zhd1wq4w7m65vdr6wd40000gn/T/codex-clipboard-998947cd-d4d6-458a-a45b-0aef8b2d027a.png` (1200 × 1025 pixels; cropped native login panel).
+- Implementation: `http://127.0.0.1:8796/oauth/connect.html?id=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` (local API fixture; no real accounts or provider credentials).
+- Mobile screenshot: `/Users/ghkdqhrbals/.codex/visualizations/2026/10/31/01a19155-eeb3-7af0-8a26-9142c1a18373/buddy-login-mobile.png` (390 × 844 CSS/pixels, devicePixelRatio 1).
+- Focused panel screenshot: `/Users/ghkdqhrbals/.codex/visualizations/2026/10/31/01a19155-eeb3-7af0-8a26-9142c1a18373/buddy-login-card.png` (390 × 334 pixels including 16px surrounding black).
+- Desktop screenshot: `/Users/ghkdqhrbals/.codex/visualizations/2026/10/31/01a19155-eeb3-7af0-8a26-9142c1a18373/buddy-login-desktop.png` (1280 × 900).
+- Small English consent screenshot: `/Users/ghkdqhrbals/.codex/visualizations/2026/10/31/01a19155-eeb3-7af0-8a26-9142c1a18373/buddy-login-consent-320-en.png` (320px CSS width; full scrolling page, no horizontal overflow).
+
+## Comparison and fidelity
+
+Reference and mobile implementation were opened together in one comparison input.
+The source is a cropped native panel rather than an entire browser viewport; panel
+widths were normalized conceptually (source 1110px panel to rendered 358 CSS px),
+not treated as equal-density full-screen captures. The focused panel capture
+makes the button/icon/paragraph geometry directly readable.
+
+- Typography: system sans serif with native Apple fallback, 18px semibold button
+  labels and 14px supporting text. The slightly larger supporting text prioritizes
+  readable browser text; there is no repeated visible login heading.
+- Layout: one charcoal rounded panel, three full-width rounded buttons in the
+  reference order, left-aligned brand marks with centered labels. Email inputs
+  appear only after choosing email; no fields clutter the first screen.
+- Tokens: black page, #1e1e1e panel, white social buttons, #2c2c2e email button,
+  restrained border and muted explanatory copy. Hover/focus/loading states work.
+- Assets: bundled Font Awesome Apple/Google brand SVG files with attribution,
+  not text glyph approximations or generated logos. Same-origin CSP permits them.
+- Copy: intentionally describes profile/learning-record access through ChatGPT.
+  The reference's public-question visibility text belongs to the iOS community
+  login and would be inaccurate here. Language and policy links remain outside
+  the compact card.
+
+Comparison history: first visual comparison found no actionable P0/P1/P2 drift
+from the requested dark-card/button treatment. Subsequent captures verified the
+callback-result URL cleanup and retained the same layout. No P3 fixes are queued.
+
+## Browser interaction checks
+
+Browser plugin not listed; used the available Codex in-app browser through
+`cua_repl` instead of installing or invoking standalone Playwright.
+
+| Check | Result |
+| --- | --- |
+| Page identity / title | Passed: BuddyStudy account connection route |
+| Meaningful initial content | Passed: three configured login actions |
+| Error overlay / blank page | Passed: none |
+| Console errors and warnings | Passed: none |
+| Screenshot comparison | Passed: reference plus rendered mobile/full/focused views |
+| Email interaction | Passed: chooser → email → code → invalid-code message → valid-code consent |
+| Social UI interaction | Passed: Apple and Google → local callback fixture → consent |
+| Browser binding UX | Passed: callback result removed from URL before login-state completion |
+| Responsive / translation | Passed: 390px mobile, 1280px desktop, 320px English consent |
+| Narrow-screen reachability | Passed: document scrolls to consent actions; scrollWidth = 320 |
+
+Server tests separately verify signed JWTs, web audiences, issuer, expiry, nonce,
+Apple code hash, state consumption, exact ACTIVE provider-subject ownership, and
+original-cookie + one-time-result completion. Missing/wrong result cannot verify
+an identity. No new native iOS login/session code was introduced.
+
+## Remaining verification
+
+The local fixture proves rendering and UI transitions, not Apple/Google console
+configuration, SMTP delivery, real social account login, or production deployment.
+Configure the dedicated Google Web application client/secret and grouped Apple
+Services ID/callbacks using the plugin README, deploy through the backend workflow,
+and verify real existing accounts. Unconfigured social providers are hidden.
+
+
+---
+
+# Previous design QA (retained)
+
 # My Studies Deep-Tree Drill-Down Design QA
 
 ## Evidence

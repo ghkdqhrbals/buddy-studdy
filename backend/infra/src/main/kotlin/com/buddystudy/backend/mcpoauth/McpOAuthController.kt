@@ -18,6 +18,10 @@ import kotlinx.coroutines.reactor.awaitSingle
 
 interface McpOAuthWebPort {
     suspend fun passwordLogin(id: String, secret: String, email: String, password: String, remoteAddress: String): Boolean
+    fun loginProviders(): Set<String>
+    suspend fun startSocial(id: String, secret: String, provider: String): String
+    suspend fun socialCallback(provider: String, state: String, code: String, idToken: String, error: String): String
+    suspend fun loginState(id: String, secret: String, result: String = ""): McpOAuthLoginState
     suspend fun start(parameters: Map<String, String>, remoteAddress: String): McpOAuthStart
     suspend fun restart(id: String, secret: String, remoteAddress: String): McpOAuthStart
     suspend fun manage(remoteAddress: String): McpOAuthStart
@@ -35,6 +39,10 @@ interface McpOAuthWebPort {
 @Component
 class McpOAuthWebAdapter(private val oauth: McpOAuthUseCase) : McpOAuthWebPort {
     override suspend fun passwordLogin(id: String, secret: String, email: String, password: String, remoteAddress: String) = oauth.passwordLogin(id, secret, email, password, remoteAddress)
+    override fun loginProviders() = oauth.loginProviders()
+    override suspend fun startSocial(id: String, secret: String, provider: String) = oauth.startSocial(id, secret, provider)
+    override suspend fun socialCallback(provider: String, state: String, code: String, idToken: String, error: String) = oauth.socialCallback(provider, state, code, idToken, error)
+    override suspend fun loginState(id: String, secret: String, result: String) = oauth.loginState(id, secret, result)
     override suspend fun start(parameters: Map<String, String>, remoteAddress: String) = oauth.start(McpOAuthRequest(
         parameters["client_id"].orEmpty(), parameters["redirect_uri"].orEmpty(), parameters["state"].orEmpty(),
         parameters["code_challenge"].orEmpty(), parameters["resource"].orEmpty(), parameters["scope"].orEmpty(),
@@ -61,6 +69,33 @@ class McpOAuthController(
     @Value("\${buddystudy.mcp.oauth.trust-proxy:false}") private val trustProxy: Boolean = false,
 ) {
     private val resource get() = "$issuer/api/v1/mcp"
+    @GetMapping("/oauth/login-options")
+    fun loginOptions() = mapOf("providers" to oauth.loginProviders())
+
+    @PostMapping("/oauth/social/start")
+    suspend fun socialStart(@RequestBody body: BrowserInput, exchange: ServerWebExchange) =
+        mapOf("redirect" to oauth.startSocial(body.id, browserSecret(body.id, exchange), body.provider))
+
+    @PostMapping("/oauth/login-state")
+    suspend fun loginState(@RequestBody body: BrowserInput, exchange: ServerWebExchange) =
+        oauth.loginState(body.id, browserSecret(body.id, exchange), body.result)
+
+    @GetMapping("/oauth/social/google/callback")
+    suspend fun googleCallback(@RequestParam parameters: MultiValueMap<String, String>) = socialCallback("google", parameters)
+
+    @PostMapping("/oauth/social/apple/callback", consumes = [MediaType.APPLICATION_FORM_URLENCODED_VALUE])
+    suspend fun appleCallback(exchange: ServerWebExchange) = socialCallback("apple", exchange.formData.awaitSingle())
+
+    private suspend fun socialCallback(provider: String, parameters: MultiValueMap<String, String>): ResponseEntity<Void> {
+        require(parameters.values.all { it.size == 1 })
+        val state = parameters.getFirst("state").orEmpty()
+        val code = parameters.getFirst("code").orEmpty()
+        val token = parameters.getFirst("id_token").orEmpty()
+        val error = parameters.getFirst("error").orEmpty()
+        require(state.length <= 100 && code.length <= 8192 && token.length <= 16384 && error.length <= 200)
+        val redirect = oauth.socialCallback(provider, state, code, token, error)
+        return ResponseEntity.status(HttpStatus.SEE_OTHER).location(URI(redirect)).build()
+    }
     @GetMapping("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/v1/mcp")
     fun resourceMetadata() = mapOf("resource" to resource, "authorization_servers" to listOf(issuer),
         "scopes_supported" to listOf("learning:read", "learning:write", "learning:delete", "profile:read", "offline_access"), "bearer_methods_supported" to listOf("header"))
@@ -173,5 +208,5 @@ class McpOAuthController(
         return exchange.request.remoteAddress?.address?.hostAddress ?: "unknown"
     }
     private fun cookieName(id: String) = "__Secure-bs-oauth-$id"
-    data class BrowserInput(var id: String = "", var email: String = "", var password: String = "", var code: String = "", var allow: Boolean = false, var connectionId: String = "")
+    data class BrowserInput(var id: String = "", var email: String = "", var password: String = "", var code: String = "", var allow: Boolean = false, var connectionId: String = "", var provider: String = "", var result: String = "")
 }

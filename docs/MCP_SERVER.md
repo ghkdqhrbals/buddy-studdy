@@ -941,3 +941,55 @@ of existing learning scope boundaries, exact catalog discovery and profile-body
 redaction in exchange logs. Plugin JSON, JS syntax and diff checks passed.
 The privacy alias routing is preserved at the currently published September 2
 version, with its previously missing KO/EN/JA source restored for publication.
+
+
+## Compact login chooser and social web authentication (2026-10-31)
+
+The browser starts with a dark rounded panel and Apple/Google/email actions. Email
+fields open only on explicit selection. The same dark visual tokens apply to code,
+consent and connection-management states. The text describes this ChatGPT
+connection rather than the public-question discovery copy in the reference image.
+Icons are bundled Font Awesome brand assets with attribution; no external image or
+script host is required. CSP allows only same-origin images.
+
+`McpOAuthSocialIdentityAdapter` implements the outbound
+`McpOAuthSocialIdentityPort`. Google exchanges an authorization code on the server;
+Apple posts a hybrid response. Dedicated web audiences, signature, issuer, expiry,
+nonce, state and Apple's code hash are verified before an exact provider/subject
+lookup of an ACTIVE account. No email matching, signup or native app session occurs.
+State, nonce and completion-result values are stored only as hashes in the existing
+JSON grant payload; no SQL migration or new store is introduced.
+
+Apple's cross-site POST is accepted without browser cookies, but cannot complete
+login. It returns a random one-time result to the originating browser. A same-origin
+`/oauth/login-state` POST requires both that result and the original HttpOnly
+cookie before marking the identity verified. Polling a grant with only its original
+cookie cannot capture a callback completed in another browser. The browser removes
+the result from its URL immediately. Callback state is consumed even on provider
+failure or an unknown identity; a fresh attempt is required. Identity-provider
+credentials are never sent to app login endpoints, browser storage, or history logs.
+
+`/oauth/login-options` exposes only configured providers. Required provider-console
+registrations, backend variables, exact callbacks and the backend-only deployment
+template are documented in [the plugin README](../plugins/buddystudy/README.md#apple-and-google-web-login).
+Live provider console setup, real Apple/Google login and production deployment are
+separate from the local signed-JWT and browser-fixture verification.
+
+Verification for the login chooser: 44 focused OAuth, persistence, JWT, request-
+logging and transport/security tests passed. JavaScript syntax and YAML syntax
+checks passed. In-app-browser local-fixture checks covered email/invalid-code/
+consent, both social return paths, callback-result URL removal, KO/EN, mobile
+390px, narrow 320px and desktop 1280px; no console warnings/errors or horizontal
+overflow were observed. Visual comparison is recorded in `design-qa.md`. Real
+provider-console configuration and production login remain unverified.
+
+Production integration verification (2026-10-31): social login and the chooser
+were ported onto `76cfae70`, preserving password login, required-term acceptance
+and explicit learning/profile scopes. 80 focused application/infrastructure/
+transport/security tests passed. The cold checkout exceeded the default Kotlin
+compiler heap; the successful run used `--max-workers=1`, a 3GiB Gradle heap and
+`-Pkotlin.compiler.execution.strategy=in-process`. In-app-browser fixture checks
+verified social callback → required terms → scoped consent without errors.
+The deployment repository's provider env wiring was pushed as `10e4525`; its nine
+backend rollout/notification/configuration tests passed. Console registration and
+production provider activation remain pending until the credentials exist.
