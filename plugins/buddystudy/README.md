@@ -97,14 +97,26 @@ The publication ZIP includes five positive and three negative review scenarios,
 listing metadata, public support/privacy/terms URLs, and the remote OAuth MCP
 configuration. It contains no reviewer credentials.
 
-The OpenAI organization shows **Verified** as of 2026-10-21. The plugin upload
-form offers the verified identity **GYUMIN HWANGBO**. The 0.2.0 package targets
-**KR, US and JP**, as selected by the owner.
+The verified publisher is **GYUMIN HWANGBO**. The current 0.2.1 author package
+targets all supported countries. Its public portal draft is
+`plugin_asdk_app_6ae65ced3f908191ba7ddf9ba790bd25`; upload does not establish review
+submission or directory publication. The portal shows the configured OAuth
+connection as **Authorized**, its domain as **Domain verified**, and a 28-tool
+scan with no findings. Reviewer credentials were saved and checked only in the
+private portal fields after the owner's explicit approval.
 
-The learning backend rollout and real ChatGPT tester email authentication passed.
-The owner approved and completed the actual ChatGPT connection. A live read returned zero studies; root/topic creation was **Blocked** by `403 TERMS_AGREEMENT_REQUIRED` on the existing tester account. The owner subsequently authorized normal required-terms acceptance; it was saved through the browser flow. Live ChatGPT then created study 169/topic 170 and generated/retrieved question record 192. Exact answer submission, persisted 99/CORRECT grading, topic-statistics read and follow-up record 193 also succeeded. Exact-target deletion, a verified hosted demo and public submission remain incomplete. No public draft has been uploaded or submitted.
-Existing EMAIL-provider password login supports reviewer access without OTP;
-credentials must remain outside this package and use the existing test account.
+Existing EMAIL-provider password login supports reviewer access without OTP.
+The original private development connection retains learning-only scopes. The
+owner approved an additional `BuddyStudy Review 0.2.1` development connection for
+verification; its 28-tool catalog includes `get_my_context`, and a real host
+request returned the dedicated account profile and accurately empty context.
+Full case results, deployment receipts and known failures are recorded in
+[live review evidence](../../docs/plugin-live-review-2026-11-01.md).
+The post-deployment run completed all five positive and three negative cases in
+that approved development host. The unpublished public App's direct invocation
+remains unavailable; its configured connection and updated scan were separately
+verified. Legal attestations, review submission and publication remain distinct
+steps.
 
 Before requesting review, run all five positive and three negative packaged
 scenarios against the exact saved version, record and verify a live ChatGPT demo,
@@ -120,33 +132,25 @@ OAuth learning tools do not accept legal terms on the user’s behalf.
 
 ### Natural conversation acceptance gate
 
-ID-directed developer prompts are transport/CRUD evidence only. The original
-public demo is preparatory evidence and is not sufficient acceptance of the
-user-facing workflow. The ordinary Korean-answer case failed before the
-natural-conversation instruction update: ChatGPT praised the answer without
-submitting it, and incorrectly insisted on English. Public submission must not
-claim this case passed until the deployed update is refreshed in ChatGPT and
-verified with ordinary conversation, no IDs or special submission commands.
+ID-directed developer prompts are transport/CRUD evidence only. Validate ordinary
+conversation without IDs or special submission commands. The host must submit
+the learner's exact answer and report the stored grading, rather than merely
+praising the response or inventing a score.
 
 The positive answer case now sets up a presented pending question and supplies
 only the learner's answer text. Expected behavior is canonical exact-answer
 submission and saved grading. Hints, explicit drafts and ambiguous multiple
 questions must not be silently submitted.
 
-Updated checkpoint: `ec113008` is deployed and the development installation's
-tools were refreshed. In a separate GPT-5.6 Sol conversation, an ordinary Korean
-answer was submitted, graded and re-read unchanged with no user-supplied IDs;
-“give me a follow-up to this” also generated the linked question. This resolves
-the tested missing-submission case. Language-consistent practice still fails:
-Korean presentation retained an English-answer penalty in the saved grading.
-Do not treat that language case, GPT-6 rendering, multi-question ambiguity or
-the whole public submission as verified by this limited success.
+The November 1 recording verifies a natural Korean answer and unchanged-answer
+readback with 98/CORRECT. It does not establish a general fix for historical
+translated-question/rubric failures, GPT-6 rendering or multi-question ambiguity.
 
 
 ## Profile and worldwide release candidate (2026-10-31)
 
-The 0.2.1 candidate is based on remote main 679c730a, preserving existing learning
-creation, generation, grading, follow-ups and confirmed-deletion behavior. It adds
+The 0.2.1 candidate preserves existing learning creation, generation, grading,
+follow-ups and confirmed-deletion behavior. It adds
 get_my_context and buddystudy://me/context under a dedicated profile:read scope.
 Existing learning grants cannot read profiles or acquire that scope on refresh;
 users must reconnect and explicitly consent to the profile disclosure. The new
@@ -210,3 +214,9 @@ the Apple or Google consoles. Test with real existing accounts after configuring
 
 Provider references: [Google OIDC](https://developers.google.com/identity/openid-connect/openid-connect),
 [Apple web sign-in](https://developer.apple.com/documentation/signinwithapple/incorporating-sign-in-with-apple-into-other-platforms).
+
+Operational audience checkpoint (2026-11-01): Google Auth Platform was still in
+Testing with zero test users. It was changed to In production and read back
+successfully. No Google scopes or native client IDs were changed. Provider
+console configuration and working email/password reviewer access do not establish
+completed real-account Apple/Google callback tests.
