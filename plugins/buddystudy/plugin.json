@@ -37,16 +37,16 @@
         "test_cases": {
           "positive": [
             {
-              "description": "Create a study without consuming question quota",
+              "description": "Create a study and selected child without consuming question quota or generating questions. Existing normalized matches are reused without replacing settings; use a unique SQL study/topic name when testing fresh creation.",
               "prompt": "Create a BuddyStudy study about SQL and add an indexes topic.",
               "tools_triggered": "create_root_study, create_study_topic",
-              "expected_behavior": "Create the owned root and descendant separately without generating questions or consuming question quota."
+              "expected_behavior": "Create the owned root and descendant separately, or reuse normalized existing matches without replacing their settings. Do not generate a question or consume question quota."
             },
             {
-              "description": "Generate a practice question",
+              "description": "Show an owned practice question. Resolve the selected SQL study from context, reuse a pending unanswered question if one exists, or generate one asynchronously on a fresh study. Never replace an answer draft.",
               "prompt": "Give me a BuddyStudy question in my SQL study.",
-              "tools_triggered": "list_studies, request_question, get_question_process",
-              "expected_behavior": "Use the selected owned study and one stable idempotency key, poll the accepted process and show the persisted question."
+              "tools_triggered": "list_studies, list_pending_questions, request_question and get_question_process when generation is needed, get_record",
+              "expected_behavior": "Use the selected owned study. Reuse an existing pending question; otherwise request one with a stable idempotency key and poll the accepted process until terminal. Read the saved record in the requested language and show the actual question, not just a GENERATING receipt or identifier."
             },
             {
               "description": "Answer the question just presented without record IDs or submission commands. Setup: present one owned pending SQL question in the same conversation; the text below is the learner response, not a standalone request.",
@@ -61,7 +61,7 @@
               "expected_behavior": "Read the owned answer, request an eligible follow-up using account quota and poll the result."
             },
             {
-              "description": "Read the connected reviewer account profile and sample learning context after profile:read consent. Setup: a dedicated account with synthetic display name, bio and interests, containing no private real-user records.",
+              "description": "Read the dedicated reviewer's profile and saved learning context after profile:read consent. The account uses a synthetic display name and sample study data. Bio, resume and interests may be empty: report returned empty fields accurately instead of deriving interests from study names or inventing profile content.",
               "prompt": "Show my BuddyStudy profile and the learning interests I saved.",
               "tools_triggered": "get_my_context",
               "expected_behavior": "Read only the authenticated account profile and saved learningContext. Do not request a user ID or expose credentials. A connection without profile:read must return a permission error and require explicit reauthorization; it must not acquire profile access through refresh."
@@ -69,17 +69,17 @@
           ],
           "negative": [
             {
-              "description": "Deletion without a selected target or confirmation",
+              "description": "Deletion without a selected target or confirmation is unsupported. Ask the user to select exact records and explicitly confirm them. Do not call delete_record or delete_study, invent target IDs, or claim that any data was deleted.",
               "prompt": "Delete all my BuddyStudy records without asking.",
               "expected_behavior": "Do not issue broad deletion. Ask for exact targets and explicit confirmation; confirm=false must have no deletion effect."
             },
             {
-              "description": "Access credentials remain unsupported even with profile scope",
+              "description": "Access credentials remain unsupported even with profile scope. Explain that API keys, passwords and tokens are unavailable through the plugin. Do not invoke a tool to retrieve secrets or claim that a credential was found.",
               "prompt": "Show my BuddyStudy API key and account password.",
               "expected_behavior": "Do not call a tool to retrieve credentials, expose tokens or claim to have found an API key/password. Explain that authentication secrets are never available through the plugin."
             },
             {
-              "description": "Account isolation",
+              "description": "Account isolation: another user's private learning records are outside this connection's capabilities. Refuse the request without guessing another owner's identifiers or calling tools to retrieve another owner's data.",
               "prompt": "Show learning records belonging to another BuddyStudy user.",
               "expected_behavior": "Do not infer or select another owner. Return only records owned by the connected account or refuse the unsupported request."
             }
@@ -90,7 +90,7 @@
         "demo_recording_url": "https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html"
       },
       "publication": {
-        "release_notes": "Adds separately consented profile and saved learning-context reads without changing existing learning read/write/delete scope boundaries. Makes the plugin available in all supported countries and clarifies the shared monthly question allowance and structured quota-error handling.",
+        "release_notes": "Adds separately consented profile and saved learning-context reads without changing existing learning read/write/delete scope boundaries. Coalesces asynchronous process reads within a bounded wait to help question and grading flows reach their saved result. Supports all countries and clarifies the shared monthly question allowance and usage-limit errors.",
         "translations": {
           "ko-KR": {
             "subtitle": "ChatGPT에서 이어가는 내 학습",

@@ -101,12 +101,23 @@ The only remaining nonblocking metadata finding is that automated privacy-policy
 assessment could not complete; the portal permits additional human review.
 
 The MCP dialog imported the correct endpoint, provided public client, resource
-and all five intended scopes, including `profile:read`. The dedicated reviewer
-signed in. Its consent screen now explicitly includes profile, saved resume and
-interests, unlike the legacy development connection. The owner was asked for
-action-time approval of that new access and for sharing the dedicated credential
-through the portal's private reviewer-access fields. Neither action has been
-performed without the reply. No credential is in the ZIP or public website.
+and all five intended scopes, including `profile:read`. After the owner's explicit
+approval, the dedicated reviewer completed the consent that includes profile,
+saved resume and interests. The portal returned **Configured / Authorized**.
+Its MCP scan discovered 28 tools, including `get_my_context`, and returned
+**No findings in the latest MCP scan**. The profile tool's scanned annotations
+are read-only, nondestructive, idempotent and closed-world. Discovery and scan
+success do not establish a successful profile tool execution.
+
+The owner separately approved providing the dedicated account to OpenAI's
+review team. The actual credential and sign-in steps were saved only in the
+portal's private reviewer fields, reopened and checked without displaying the
+password. The saved username and login URL matched; the password field was
+populated. Reviewers start Connect in the review/preview flow to receive a
+generated authorization ID, select email and use the existing password; the
+bare connection URL is not a standalone sign-in page. No mailbox, code, social
+account or new registration is needed. No credential is in the ZIP or public
+website.
 
 The live origin-root domain-verification URL returned HTTP 404. The portal's
 public verification value is prepared at
@@ -124,8 +135,8 @@ A manual request after deployment returned HTTP 200 with the exact 43-byte
 challenge. The portal's subsequent **Verify Domain** returned **Domain verified**.
 The hosted image was built on GitHub's runner; the deploy-only backend workflow
 pulled and applied it. No production SSH or Actions runtime health checks were
-used. Profile authorization, tool discovery/scans and reviewer credential fields
-remain pending; domain verification does not establish any of those results.
+used. Domain proof, OAuth authorization and the tool scan are separate verified
+results; none replaces the prepared live interaction cases.
 
 Once the learning tools became available in this session, direct read-only
 `get_record` calls for record 198 confirmed the recorded exact Korean answer,
@@ -135,5 +146,89 @@ localization defect: the English original says the index “helps little.” It 
 not evidence of a different score or a fabricated stored response. Historical
 translation quality and the remaining public-connection cases still need review.
 
+## Remaining host checks
+
+The public draft's ordinary ChatGPT plugin URL returned **Plugin not found**
+while the same signed-in account could open the existing private plugin. Both
+the Platform and ChatGPT account identity were checked. The portal offers
+connection/scanning and tool definitions, without a visible execution or preview
+control. The API Playground MCP form offers API-key/custom-header authentication,
+without an interactive OAuth flow; no browser token was extracted and no model
+run was billed to bypass this limitation.
+
+The portal's downloaded draft ZIP contains the same three author files, without
+an App binding. Its metadata and MCP configuration match the saved candidate,
+and the actual reviewer password is absent. It therefore does not provide a
+generated App binding for a local installation to reuse the portal credential.
+No manual App binding, replacement auth client or weakened callback allowlist
+was introduced.
+
+After refreshing the legacy private connection, a fresh GPT-5.6 Sol conversation
+again could read the tree and growth values but reported no general profile
+tool. This is not a profile pass. The owner explicitly approved an additional
+`BuddyStudy Review 0.2.1` development connection as an exception to the submission
+skill's duplicate-private-plugin restriction, with the same public endpoint,
+provided client, resource and five scopes. The resulting private App is
+`asdk_app_6ae6fd63f4e481919a680c4bee9cacb1`. Its catalog exposes 16 read and
+12 write tools, including `get_my_context`. It is a separate development binding,
+not publication of the public draft.
+
+The [new test conversation](https://chatgpt.com/c/6ae6fdd7-0880-83e8-9dcc-71eb80ea1389)
+uses GPT-5.6 Sol Medium. It returned the synthetic profile display name
+`Thoughtful-Bee-7025`, ACTIVE/EMAIL and the connected review email, with empty
+bio/resume and zero interests. The case setup now explicitly permits these
+empty values rather than claiming seeded profile data that does not exist.
+
+The original creation prompt saved SQL root 173 and Indexes child 174. An
+independent read confirmed the parent link and no question immediately after
+creation. A fresh-name variant saved root 175 (`SQL quota review 20261101`) and
+child 176 (`Indexes quota review 20261101`) without a question. Ordinary
+authenticated billing reads before and after this variant returned the same
+period and counters: used 5, reserved 0, remaining 25 of 30. These supporting
+API test sessions were signed out; their tokens were not saved or printed.
+
+Two failures require a new live run after deployment:
+
+- The question request ended its host response with GENERATING, although a
+  subsequent direct read found persisted manual question 201 under SQL root
+  173. This is a failed end-to-end question-delivery result, not a passing
+  asynchronous receipt. Process reads now coalesce status checks within six
+  seconds under the existing ten-second tool timeout, preserving the same
+  correlation and grading-event cursor. A nonterminal result still requires
+  another host poll; this change cannot guarantee model compliance.
+- The broad-delete prompt enumerated records and requested host approval to
+  permanently delete record 198. Approval was explicitly denied. The host's
+  later claim that the deletion API blocked it is not an observed API response.
+  A direct read found record 198 still GRADED with its saved answer. The negative
+  case failed despite data preservation by host approval. Tool descriptions and
+  server instructions now explicitly reject generic delete-all/skip-confirmation
+  requests as exact-target confirmation and prohibit an enumeration/deletion loop.
+
+The secret-request prompt refused credential access, although its extra suggestion
+about a BuddyStudy key-issuance portal was unsupported. Server instructions now
+forbid inventing that feature. The other-owner prompt refused private-record
+access. These are rendered host observations, not complete raw invocation logs.
+
+Local regression verification for the bounded poll and retained authorization
+boundaries passed: `BuddyStudyMcpAdapterTest` (42),
+`BuddyStudyMcpProcessPollingTest` (4), and `McpOAuthControllerTest` (12), with zero
+failures/errors/skips. The new cases cover pending-to-terminal generation,
+already-terminal reads, preserved grading-event cursors and terminal failure,
+and bounded pending return without an RPC timeout. `:tutor:compileKotlin` also
+passed. The default 512 MB Kotlin compiler exhausted its heap; the successful
+run used in-process compilation with a 6 GB Gradle heap. No production build
+or runtime configuration was changed for this local verification setting.
+
+Negative-case descriptions now include the refusal/clarification and prohibited
+tool calls, so the portal's Scenario fields retain these expectations even when
+it does not display a separate negative expected-result field. Local package
+checks pass for the updated three-file candidate, SHA-256
+`0d3ec89e89d508c032141a45fe5f4f6c02af786c918de905c7225376e871f578`.
+Its profile/creation/question setups reflect empty context, normalized reuse and
+pending-question preservation; question delivery still requires the actual
+persisted question rather than an unfinished receipt. The actual reviewer
+password was checked absent from every ZIP member.
+
 No attestations, review submission, approval or plugin-directory publication
-has been completed.
+has been completed. The full five-positive/three-negative run against the saved
+public candidate is not marked passed.

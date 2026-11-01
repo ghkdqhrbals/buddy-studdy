@@ -115,7 +115,12 @@ In scope:
 - cursor-paged, node-scoped ordinary and voice learning history, with optional
   descendant inclusion and original/localized text views;
 - asynchronous question request and process polling;
-- asynchronous answer submission and grading polling;
+- asynchronous answer submission and grading polling. Each MCP process read
+  coalesces status checks for at most six seconds, returns immediately for a
+  terminal process, and retains the supplied grading-event cursor. A still-pending
+  result remains nonterminal; the host must continue polling the same process.
+  Generation/grading is never restarted by a process read, and the existing
+  ten-second read timeout and cancellation behavior still bound the call;
 - grading score, feedback, explanation, and rubric details;
 - read-only Voice Tutor quota, bounded session history, transcript/result detail,
   and safe optional-recording status metadata;

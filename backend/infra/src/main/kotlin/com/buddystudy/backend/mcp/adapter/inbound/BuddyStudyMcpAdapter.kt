@@ -15,7 +15,9 @@ import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.spec.McpSchema
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.reactor.mono
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Component
@@ -258,7 +260,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "delete_study",
                 title = "Delete a study subtree",
-                description = "Permanently delete an owned study and every descendant topic. Existing question records are retained without a study link and original voice learning history is retained. Set confirm=true only after explicit user confirmation. Optionally pass the exact confirmed subtree IDs in expected_study_ids; if the subtree has changed, nothing is deleted and fresh confirmation is required.",
+                description = "Permanently delete one explicitly selected owned study and every descendant topic, after the user confirms that exact target. A generic request to delete everything or skip confirmation is not target confirmation: ask the user to select and confirm the study; do not enumerate targets and call this tool in a loop. Existing question records are retained without a study link and original voice learning history is retained. Set confirm=true only after that explicit confirmation. Optionally pass the exact confirmed subtree IDs in expected_study_ids; if the subtree has changed, nothing is deleted and fresh confirmation is required.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "study_id" to idProperty("Root of the subtree to delete."),
@@ -332,11 +334,16 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "get_question_process",
                 title = "Get question generation status",
-                description = "Get the authenticated user's asynchronous question-generation state and generated question when complete.",
+                description = "Wait briefly for the authenticated user's existing question-generation process, returning immediately when terminal. If terminal=false, keep polling this same correlation_id; do not finish with only GENERATING or queue another question. When complete, read get_record in the requested language and present the persisted question.",
                 schema = correlationSchema(),
                 readOnly = true,
             ) { principal, args ->
-                buddyStudy.getQuestionProcess(principal, args.string("correlation_id"))
+                val correlationId = args.string("correlation_id")
+                awaitProcess(
+                    read = { buddyStudy.getQuestionProcess(principal, correlationId) },
+                    terminal = { it.terminal },
+                    pollAfter = { it.pollAfterMs },
+                )
             },
             tool(
                 name = "submit_answer",
@@ -365,7 +372,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "get_grading_process",
                 title = "Get answer grading status",
-                description = "Return grading state and durable progress events. Poll after pollAfterMs until terminal=true.",
+                description = "Wait briefly for the existing answer-grading process and return durable progress events. If terminal=false, keep polling the same correlation_id after pollAfterMs; do not finish with only a queued receipt. When terminal=true, read the saved record and report its actual result.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "correlation_id" to stringProperty("Grading correlation ID.", minLength = 1, maxLength = 100),
@@ -375,15 +382,17 @@ class BuddyStudyMcpAdapter(
                 ),
                 readOnly = true,
             ) { principal, args ->
-                buddyStudy.getGradingProcess(
-                    principal,
-                    args.string("correlation_id"),
-                    args.long("after_event_id", 0),
+                val correlationId = args.string("correlation_id")
+                val afterEventId = args.long("after_event_id", 0)
+                awaitProcess(
+                    read = { buddyStudy.getGradingProcess(principal, correlationId, afterEventId) },
+                    terminal = { it.terminal },
+                    pollAfter = { it.pollAfterMs },
                 )
             },
             tool(
                 name = "delete_record", title = "Delete a learning record",
-                description = "Permanently delete one owned question and its answer/feedback only after the user explicitly confirms the exact record. Read get_record first, then pass confirm=true. Deleting a study does not delete its saved records.",
+                description = "Permanently delete one explicitly selected owned question and its answer/feedback after the user confirms that exact record. A generic request to delete all records or skip asking is not target confirmation: ask the user to select and confirm the specific question; do not enumerate records and call this tool in a loop. Read get_record only for the selected target, then pass confirm=true after explicit confirmation. Deleting a study does not delete its saved records.",
                 schema = objectSchema(properties = linkedMapOf("record_id" to idProperty("Owned learning record ID."), "confirm" to mapOf("type" to "boolean", "description" to "True only after explicit user confirmation.")), required = listOf("record_id", "confirm")),
                 readOnly = false, destructive = true, idempotent = false,
             ) { principal, args -> buddyStudy.deleteRecord(principal, args.long("record_id"), args.boolean("confirm")) },
@@ -687,6 +696,27 @@ class BuddyStudyMcpAdapter(
         }
     }
 
+    private suspend fun <T> awaitProcess(
+        read: suspend () -> T,
+        terminal: (T) -> Boolean,
+        pollAfter: (T) -> Long?,
+    ): T {
+        var latest = read()
+        if (!terminal(latest)) {
+            // A tight series of immediate pending responses can exhaust the
+            // host's polling turn before generation finishes. Coalesce reads
+            // within the existing ten-second tool deadline without requeuing
+            // work, changing quota, or losing events after the supplied cursor.
+            withTimeoutOrNull(PROCESS_POLL_WINDOW_MS) {
+                while (!terminal(latest)) {
+                    delay((pollAfter(latest) ?: 1_000).coerceIn(500, 2_000))
+                    latest = read()
+                }
+            }
+        }
+        return latest
+    }
+
     private fun resource(
         uri: String,
         name: String,
@@ -948,6 +978,7 @@ class BuddyStudyMcpAdapter(
             mapOf("get_my_context" to "profile:read")
         const val APPLICATION_JSON = "application/json"
         val READ_TIMEOUT: Duration = Duration.ofSeconds(10)
+        const val PROCESS_POLL_WINDOW_MS = 6_000L
 
         fun objectSchema(
             properties: Map<String, Map<String, Any>> = emptyMap(),
