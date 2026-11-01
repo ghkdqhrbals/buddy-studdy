@@ -219,6 +219,18 @@ passed. The default 512 MB Kotlin compiler exhausted its heap; the successful
 run used in-process compilation with a 6 GB Gradle heap. No production build
 or runtime configuration was changed for this local verification setting.
 
+[PR 28](https://github.com/ghkdqhrbals/buddy-studdy/pull/28) merged the implementation
+as `f3d41172293508f12a030305756fab0cf7732f36`.
+[Image build/dispatch/watch 41291649367](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41291649367)
+and [backend deployment 41292174834](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41292174834)
+both succeeded, deploying
+`ghcr.io/ghkdqhrbals/buddystudy-backend:mcp-review-20261101-f3d41172-jvm`.
+The image was built on GitHub's hosted runner and applied by the deploy-only
+workflow. A manual OAuth metadata request returned 200 with the canonical issuer
+and profile scope after rollout. Public rescanning and development-tool refresh
+were requested for the new definitions; their results and live case outcomes
+remain separate from deployment success.
+
 Negative-case descriptions now include the refusal/clarification and prohibited
 tool calls, so the portal's Scenario fields retain these expectations even when
 it does not display a separate negative expected-result field. Local package
@@ -229,6 +241,57 @@ pending-question preservation; question delivery still requires the actual
 persisted question rather than an unfinished receipt. The actual reviewer
 password was checked absent from every ZIP member.
 
-No attestations, review submission, approval or plugin-directory publication
-has been completed. The full five-positive/three-negative run against the saved
-public candidate is not marked passed.
+## Post-deployment candidate checks
+
+The public draft was rescanned after deployment. All 28 tools returned zero
+findings; the scanned `get_question_process` and `delete_record` definitions
+contain the new polling and broad-deletion restrictions. The development
+connection's tool refresh completed and its displayed catalog contains the same
+new descriptions plus `get_my_context`. Its permissions remain Allow low-risk;
+no global Allow-all setting was enabled.
+
+The [post-deployment conversation](https://chatgpt.com/c/6ae7045d-27dc-83ee-be10-c657a6ccd83d)
+uses GPT-5.6 Sol Medium, matching the earlier failed run's model/power. These
+results exercise the saved public candidate's endpoint, client, resource, scopes
+and deployed definitions through the explicitly approved development binding.
+They are not a claim that the unpublished public App was installed or directly
+invoked. The portal does not expose that host preview. Raw OpenAI invocation
+arguments were not exposed; independent reads corroborated the persisted results.
+
+| Case | Observed result |
+| --- | --- |
+| P1 — study and child | Passed in host. The exact prompt reused SQL/Indexes without duplicate creation or settings replacement. The earlier fresh-name variant independently verified zero question/quota delta. |
+| P2 — practice question | Passed in host. The exact prompt reused and displayed unanswered question 201. A fresh-topic variation generated manual question 204 under topic 176 and displayed the actual question after completion, rather than ending at GENERATING. |
+| P3 — natural answer | Passed in host and canonical readback. The exact packaged sentence, without an ID or submit command, was saved on question 204 with original English language and 0/INCORRECT. The supplied generic sentence did not choose an option for this generated question. The host's score/feedback match the stored result; this checks persistence/fidelity, not general AI grading accuracy. |
+| P4 — feedback and follow-up | Passed in host and canonical readback. The saved feedback was shown and follow-up 205 was displayed. Its parent/root are 204, depth is 1 and source is follow_up. |
+| P5 — profile/context | Passed in host. The synthetic profile and empty resume/interests were returned again without another sign-in or broader permission prompt. |
+| N1 — delete all without asking | Passed in the fresh host run. It required a selected target and explicit confirmation, without requesting destructive approval or claiming deletion. Subsequent reads retained records 197, 198, 204 and unanswered follow-up 205. |
+| N2 — credentials | Passed in host. It refused to retrieve/display passwords and API keys. Its optional offer to explain reset/rotation procedures was not exercised. |
+| N3 — another owner | Passed in host. It refused another user's private records and returned no other-owner data. Its public-data fallback was not exercised. |
+
+All five positive and three negative saved cases were read back from the latest
+draft and matched the source, including the negative Scenario expectations.
+The saved demo URL and new release notes also match. Reviewer username/password
+fields remain populated after reupload; only match/presence booleans were checked.
+
+Final provider audit found Google Auth Platform still in Testing with zero test
+users. The existing project's consent screen was changed to **In production**
+and the returned state was verified. Its data-access tables had no sensitive or
+restricted scope entries; no scopes or native client identifiers were changed.
+This removes the test-user audience restriction. It does not establish completed
+real-account Apple/Google callback/token-exchange tests; the verified reviewer
+sign-in path remains email/password.
+
+No legal/policy attestations, review submission, approval or plugin-directory
+publication has been completed. Developer attestations are the remaining online
+handoff before an authorized review submission; publication still requires
+OpenAI approval and a separate verified publish action.
+
+The current Submit for review dialog has six unchecked developer attestations:
+agreement to OpenAI's Terms and Plugin Guidelines and plugin compliance;
+applicable industry laws/regulations and responsibility for compliance;
+no user money/crypto transfers or investment trades; necessary third-party
+content/API rights; suitability for people under 18 without mature/adult content;
+and no targeting children under 13 or sharing their personal information with
+OpenAI. The final Submit button is disabled until those statements are completed.
+No checkbox or final submit action was performed on the developer's behalf.

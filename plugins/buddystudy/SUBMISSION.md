@@ -47,27 +47,30 @@ A deploy, private installation or locally valid archive does not meet that outco
 
 | Requirement | Current evidence / next action |
 | --- | --- |
-| Dedicated reviewer access | Resolved: the owner supplied the actual reviewer credential; email/password login and existing learning consent succeeded. It is stored only in macOS Keychain (`BuddyStudy reviewer login`), not in this repository or ZIP. No password reset was performed. |
-| Current five positive cases | A current private-host rehearsal displayed the saved tree, Korean question, exact Korean answer/97-point grading, and a linked follow-up. Quota delta, raw tool arguments/feedback fidelity and profile consent remain unverified; run all cases against the final saved public version. |
-| Development profile scope | The legacy development connection opens the learning-management disclosure, rather than the profile disclosure. Verify its requested scopes before the profile case; a successful legacy learning login does not prove profile access. The public author `mcp.json` explicitly requests `profile:read`. |
-| Three negative cases | Current-host secret and other-owner requests were refused. The broad-delete case was interrupted and records were subsequently found intact; it is not a passing refusal case. Repeat safely in the final checks. |
+| Dedicated reviewer access | Resolved: the owner supplied the actual reviewer credential; email/password login and existing learning consent succeeded. It is retained in macOS Keychain (`BuddyStudy reviewer login`) and the explicitly authorized private portal reviewer fields, outside this repository and ZIP. No password reset was performed. |
+| Current five positive cases | Passed in the approved development host using the saved candidate's endpoint/client/scopes and deployed definitions: creation/reuse, quota-free fresh creation, actual question delivery, exact answer/grade readback, linked follow-up and profile/context. The post-deploy answer case saved 0/INCORRECT for the generic test sentence on an option-choice question; persistence/fidelity passed, not general grading accuracy. Direct invocation of the unpublished public App remains unavailable; see the explicit binding and raw-log limits in the live evidence. |
+| Development profile scope | The owner explicitly approved an additional `BuddyStudy Review 0.2.1` development connection, App `asdk_app_6ae6fd63f4e481919a680c4bee9cacb1`, as an exception to the duplicate-private-plugin restriction. It uses the public candidate's endpoint/client/resource/five scopes and exposes 16 read + 12 write tools. The legacy connection is preserved. |
+| Three negative cases | Passed in the fresh post-deploy host run. Broad deletion now asks for exact targets/confirmation; secrets and other-owner private data are refused. Records 197/198/204 and follow-up 205 remained present. The earlier failed deletion attempt and manual host denial are preserved separately in the evidence. |
 | Korean answer language | A fresh Korean exercise returned 97/CORRECT and the saved original Korean answer. It did not reproduce the English-answer penalty, but historical translated-question/rubric behavior is not established as fixed. |
 | Current demo | Complete: [new real ChatGPT recording](https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html), 155.8 seconds, H.264. [Pages deployment 41243415975](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41243415975) succeeded from `e0574ffb`. Public Chrome playback advanced through 104 seconds with no media error, including a seek to the saved-result segment. The page truthfully identifies the legacy connection's missing profile scope. The actual URL is now in `plugin.json`. |
 | Public portal draft | Uploaded 0.2.1 in the intended Personal organization with Individual — GYUMIN HWANGBO. Public draft `plugin_asdk_app_6ae65ced3f908191ba7ddf9ba790bd25` preserves the separate private installation. Publisher, four URLs, all countries, KO/JA translations, 5/3 cases and new demo URL were read back. A listing-price finding was corrected and cleared by reupload. Remaining privacy-assessment finding is explicitly nonblocking. |
-| Domain/auth/scans | Domain complete: [image build/dispatch/watch 41244161423](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41244161423) and [backend deployment 41244673073](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41244673073) succeeded from `bf26b982`. Manual HTTP returned the exact 43-byte proof and the portal returned **Domain verified**. The public MCP dialog imported all five intended scopes; the signed-in reviewer reached the profile/resume/interests consent screen. New access awaits owner approval. Discovery/scans and exact-version cases remain separate, unverified requirements. |
-| Reviewer credentials | Login works. Private portal fields remain empty pending the owner's explicit approval to provide the dedicated credential to OpenAI reviewers. Never put it in the ZIP or listing. |
+| Domain/auth/scans | Complete: **Configured / Authorized / Domain verified**. The post-deployment public scan found all 28 tools with zero findings, and scanned definitions contain the new polling/deletion instructions. Reupload preserved authorization. Scan results and host execution evidence remain distinct. |
+| Social web setup | Apple Services ID and Google web client/callback/secret wiring are configured. The final audit changed Google's remaining Testing audience to In production and verified the result, without scope/native-client changes. Real Apple/Google account callback completion is not claimed; reviewer email/password sign-in is verified. |
+| Reviewer credentials | The owner approved disclosure to OpenAI reviewers. The actual credential and sign-in steps were saved only in private reviewer fields, then reopened and checked; they remain populated after reupload. The inspected ZIP contains no reviewer password or private App binding. |
 | Attestations | The authorized developer must complete the current legal/policy attestations. Do not infer or accept them on the developer's behalf. |
 | Review and publication | Not submitted, approved or published. Verify each returned state separately; publish only the approved release and confirm its directory listing. |
 
 ## Resume order
 
-1. With the owner's reply, complete the prepared profile grant and private
-   reviewer-credential fields. Preserve credentials off-screen.
-2. Run the remaining exact-version cases with sample data, including profile,
-   quota evidence and the interrupted delete refusal. Package validation and
-   the development rehearsal do not replace these final checks.
-3. Resolve required scans and obtain the developer's attestations, submit for
-   review, track its real status, and publish after approval.
+1. [Build/dispatch/watch 41291649367](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41291649367)
+   and [backend rollout 41292174834](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41292174834)
+   succeeded from `f3d41172`. The 58-test MCP/OAuth set, tutor compile, metadata
+   refresh, public rescan and the approved host case run are recorded in the
+   [live evidence](../../docs/plugin-live-review-2026-11-01.md).
+2. Have the authorized developer complete the current legal/policy attestations
+   on the prepared submission. Do not accept these facts on their behalf.
+3. Submit for review within the user's authorization, track its returned state,
+   and publish only after approval. Verify the actual directory release.
 
 References: [submission guide](https://developers.openai.com/plugins/deploy/submission),
 [review requirements](https://developers.openai.com/plugins/deploy/app-review).

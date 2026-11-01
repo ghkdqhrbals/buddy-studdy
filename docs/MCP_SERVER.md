@@ -1065,3 +1065,21 @@ succeeded with image
 Post-deploy manual metadata checks retained the intended scopes and both social
 providers. Real authenticated ChatGPT review cases are still separate pending
 evidence; fixture tests and deployment success do not establish those outcomes.
+
+## Latest public-candidate verification (2026-11-01)
+
+The polling/confirmation update is deployed from `f3d41172` through
+[build/dispatch/watch 41291649367](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/41291649367)
+and [backend deployment 41292174834](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/41292174834).
+The 58 targeted MCP/OAuth tests and tutor Kotlin compilation passed. The public
+draft's new scan returned all 28 tools with zero findings. An explicitly approved
+profile-enabled development binding then exercised all five positive and three
+negative candidate cases, with canonical record readback for answer 204 and
+follow-up 205. See [the full evidence and binding limits](plugin-live-review-2026-11-01.md).
+
+Google Auth Platform's remaining Testing audience was changed to In production
+and verified in the live console, without scope/native-client changes. Real
+Apple/Google callback completion remains separate from the working email/password
+reviewer flow. Private reviewer credentials remain in Keychain and the portal,
+outside this repository and the ZIP; legal
+attestations, review submission and directory publication remain pending.
