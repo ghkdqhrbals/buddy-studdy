@@ -115,8 +115,10 @@ Full case results, deployment receipts and known failures are recorded in
 The post-deployment run completed all five positive and three negative cases in
 that approved development host. The unpublished public App's direct invocation
 remains unavailable; its configured connection and updated scan were separately
-verified. Legal attestations, review submission and publication remain distinct
-steps.
+verified. On November 3 the owner confirmed the current developer attestations
+and 0.2.1 was submitted. The returned release
+`pluginrel_2f60fa2567c48191aaeaacea004ccb6c` shows **In review / Not published**.
+Approval and directory publication remain separate, unfinished steps.
 
 Before requesting review, run all five positive and three negative packaged
 scenarios against the exact saved version, record and verify a live ChatGPT demo,

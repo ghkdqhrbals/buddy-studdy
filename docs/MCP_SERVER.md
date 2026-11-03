@@ -1081,5 +1081,7 @@ Google Auth Platform's remaining Testing audience was changed to In production
 and verified in the live console, without scope/native-client changes. Real
 Apple/Google callback completion remains separate from the working email/password
 reviewer flow. Private reviewer credentials remain in Keychain and the portal,
-outside this repository and the ZIP; legal
-attestations, review submission and directory publication remain pending.
+outside this repository and the ZIP. On November 3 the owner's confirmed legal
+attestations were recorded and 0.2.1 was submitted. Release
+`pluginrel_2f60fa2567c48191aaeaacea004ccb6c` returned **In review / Not published**.
+Approval and directory publication remain pending.
