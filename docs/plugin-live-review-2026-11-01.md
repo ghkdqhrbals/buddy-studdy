@@ -282,16 +282,46 @@ This removes the test-user audience restriction. It does not establish completed
 real-account Apple/Google callback/token-exchange tests; the verified reviewer
 sign-in path remains email/password.
 
-No legal/policy attestations, review submission, approval or plugin-directory
-publication has been completed. Developer attestations are the remaining online
+As of November 1, no legal/policy attestations, review submission, approval or
+plugin-directory publication had been completed. Developer attestations were the remaining online
 handoff before an authorized review submission; publication still requires
 OpenAI approval and a separate verified publish action.
 
-The current Submit for review dialog has six unchecked developer attestations:
+The November 1 Submit for review dialog had six unchecked developer attestations:
 agreement to OpenAI's Terms and Plugin Guidelines and plugin compliance;
 applicable industry laws/regulations and responsibility for compliance;
 no user money/crypto transfers or investment trades; necessary third-party
 content/API rights; suitability for people under 18 without mature/adult content;
 and no targeting children under 13 or sharing their personal information with
 OpenAI. The final Submit button is disabled until those statements are completed.
-No checkbox or final submit action was performed on the developer's behalf.
+No checkbox or final submit action had been performed at that checkpoint.
+
+## Submission receipt — 2026-11-03
+
+The owner explicitly replied that the six current developer attestations had
+been reviewed and the submission completed. A portal reload still showed only
+the 0.2.1 draft, with **Not submitted / Not published**; no other submitted
+metadata version was listed and the MCP remained Draft. The unchanged six
+statements were recorded from the owner's explicit confirmation, the private
+review context was restored and Submit was invoked once. No attestation facts
+were inferred from the original implementation request.
+
+The portal returned a release entry and its detail view confirmed:
+
+- Plugin: `plugin_asdk_app_6ae65ced3f908191ba7ddf9ba790bd25`
+- Submitted release: `pluginrel_2f60fa2567c48191aaeaacea004ccb6c`
+- Metadata version: **0.2.1 · In review**
+- Review status: **In review**
+- Publication: **Not published**
+- [Submitted-version detail](https://platform.openai.com/plugins/manage/plugin_asdk_app_6ae65ced3f908191ba7ddf9ba790bd25?version=pluginrel_2f60fa2567c48191aaeaacea004ccb6c)
+
+The private submission note distinguishes the approved development-host tests
+from direct invocation of the unpublished public App, identifies the legacy
+demo's profile limitation and the uncompleted real social callback tests, and
+links this evidence. It requests manual review of the nonblocking automated
+privacy-assessment finding. The submitted archive and connection were not
+replaced, nor was any review cancelled.
+
+This verifies receipt for review, not approval or directory publication. Wait
+for the actual decision; before an authorized publish, verify the approved
+release and its country targeting, then verify the resulting directory listing.
