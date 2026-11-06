@@ -6,6 +6,8 @@ import com.buddystudy.backend.notification.application.model.AppNotificationsRes
 import com.buddystudy.backend.notification.application.model.NotificationMutationResponse
 import com.buddystudy.backend.notification.application.model.NotificationUnreadCountResponse
 import com.buddystudy.backend.notification.application.model.NotificationOpenSource
+import com.fasterxml.jackson.annotation.JsonCreator
+import com.fasterxml.jackson.annotation.JsonProperty
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -70,4 +72,6 @@ class NotificationController(
         notifications.deleteAll(authentication)
 }
 
-data class NotificationOpenRequest(val source: NotificationOpenSource)
+data class NotificationOpenRequest @JsonCreator(mode = JsonCreator.Mode.PROPERTIES) constructor(
+    @param:JsonProperty(value = "source", required = true) val source: NotificationOpenSource,
+)
