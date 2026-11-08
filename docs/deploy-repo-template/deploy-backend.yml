@@ -622,6 +622,7 @@ jobs:
             echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
           } >> "${GITHUB_ENV}"
 
+          # Keep reviewed release refs configuration-only; dependency/runtime readiness belongs to Grafana.
           # Verify the submitted service configuration without waiting for runtime health.
           DEPLOYED_IMAGE="$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' buddystudy_backend)"
           EXPECTED_IMAGE_SPEC="${IMAGE_REF}"
