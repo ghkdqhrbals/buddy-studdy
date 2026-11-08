@@ -11,6 +11,19 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - `infra`: WebFlux/scheduler/stream adapters, R2DBC persistence adapters, OpenAI/APNs/Redis integrations.
 - `tutor`: executable Spring Boot root module, bootstrap resources, AWS Secrets environment post processor, integration tests.
 
+## JSON Mapping
+
+Spring Boot 4 WebFlux uses Jackson 3 for HTTP JSON, while internal JSON code uses
+the Jackson 2 `JsonMapperProvider`. Its Kotlin module does not configure the HTTP
+mapper. `NotificationOpenRequest` declares a property-based `@JsonCreator` and a
+required `source` property so HTTP decoding can construct the immutable request.
+Adding the Jackson 3 Kotlin module globally also changes existing Boolean response
+field names; that requires a separate API compatibility migration.
+
+`NotificationJsonCodecTest` covers the auto-configured HTTP codecs with a
+Jackson 2 mapper also present: PUSH and INBOX opens succeed, while missing,
+null, or unknown sources return the existing 422 `VALIDATION_ERROR` response.
+
 ## What It Does
 
 - Stores APNs device tokens.

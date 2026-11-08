@@ -151,6 +151,12 @@ deployment.
   For the 1.2.0 preparation, `codex/personalized-feed-rollout` starts from the
   previously successful deployment configuration `9f49905e`, preserving its
   removal of health gates. Keep `promote_swarm=false` for an ordinary rollout.
+  For the notification-open fix, `codex/notification-open-deploy-20261108`
+  starts from the current private deploy `main`, removes dependency readiness
+  probes and Swarm runtime waits, and includes the template's manual Slack opt-out.
+  It retains the current MCP/OAuth,
+  social sign-in, voice, Promtail, and proxy settings; the older personalized-feed
+  ref predates these settings and must not be used for this release.
 - Backend administrator recovery requires the exact `RESET admin` confirmation
   and a temporary cost-12 BCrypt hash in
   `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH`. It must never accept or print a
