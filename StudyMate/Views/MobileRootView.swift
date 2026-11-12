@@ -1691,13 +1691,15 @@ private struct MobileHomeView: View {
                 navigationTitle: strings.newStudyCategory,
                 initialTitle: newStudyInitialTitle,
                 initialDifficulty: .beginner,
+                initialQuestionFormatPreference: .mixed,
                 strings: strings
-            ) { title, difficulty, _ in
+            ) { title, difficulty, _, formatPreference in
                 appState.addStudyCategory(
                     title,
                     difficulty: difficulty,
                     customPrompt: nil,
-                    openAIModel: StudySettings.defaultOpenAIModel
+                    openAIModel: StudySettings.defaultOpenAIModel,
+                    questionFormatPreference: formatPreference ?? .mixed
                 )
             }
         }
@@ -1706,16 +1708,17 @@ private struct MobileHomeView: View {
                 navigationTitle: strings.editStudyCategory,
                 initialTitle: category.title,
                 initialDifficulty: category.difficulty,
+                initialQuestionFormatPreference: category.questionFormatPreference,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: category.id)
                 }
-            ) { title, difficulty, _ in
-                appState.updateStudyCategory(
-                    id: category.id,
-                    title: title,
-                    difficulty: difficulty
-                )
+            ) { title, difficulty, _, formatPreference in
+                if let roomID = Int(category.id), appState.backendStudyRoom(id: roomID) != nil {
+                    appState.updateStudyTreeCategory(roomID: roomID, title: title, difficulty: difficulty, questionFormatPreference: formatPreference)
+                } else {
+                    appState.updateStudyCategory(id: category.id, title: title, difficulty: difficulty, questionFormatPreference: formatPreference)
+                }
             }
         }
         .sheet(item: $editingStudyRoom) { room in
@@ -1724,15 +1727,17 @@ private struct MobileHomeView: View {
                 initialTitle: room.topic,
                 initialDifficulty: Difficulty(level: room.difficultyLevel),
                 initialQuestionRotationEnabled: room.activeForQuestions,
+                initialQuestionFormatPreference: room.parentStudyId == nil ? room.questionFormatPreference : nil,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { title, difficulty, questionRotationEnabled in
+            ) { title, difficulty, questionRotationEnabled, formatPreference in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
                     title: title,
-                    difficulty: difficulty
+                    difficulty: difficulty,
+                    questionFormatPreference: formatPreference
                 )
                 if let questionRotationEnabled,
                    questionRotationEnabled != room.activeForQuestions {
@@ -2517,13 +2522,7 @@ private struct MobileHomeView: View {
 
     private func communityQuestionRow(_ question: CommunityQuestion) -> some View {
         HStack(alignment: .top, spacing: 2) {
-            Button {
-                openCommunityQuestion(question)
-            } label: {
-                MobileCommunityQuestionRow(question: question, strings: strings)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            MobileCommunityQuestionRow(question: question, strings: strings, onOpen: { openCommunityQuestion(question) })
             .frame(maxWidth: .infinity, alignment: .leading)
 
             communityQuestionActionsMenu(question)
@@ -3770,12 +3769,9 @@ private struct NotificationPublicQuestionsDestination: View {
                     .listRowSeparator(.hidden)
             } else {
                 ForEach(appState.communityQuestions) { question in
-                    Button {
+                    MobileCommunityQuestionRow(question: question, strings: strings, onOpen: {
                         selectedQuestionRoute = CommunityQuestionRoute(id: question.id)
-                    } label: {
-                        MobileCommunityQuestionRow(question: question, strings: strings)
-                    }
-                    .buttonStyle(.plain)
+                    })
                 }
             }
         }
@@ -4298,15 +4294,17 @@ struct MobileStudyTreeView: View {
                 initialTitle: room.topic,
                 initialDifficulty: Difficulty(level: room.difficultyLevel),
                 initialQuestionRotationEnabled: room.activeForQuestions,
+                initialQuestionFormatPreference: room.parentStudyId == nil ? room.questionFormatPreference : nil,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { title, difficulty, questionRotationEnabled in
+            ) { title, difficulty, questionRotationEnabled, formatPreference in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
                     title: title,
-                    difficulty: difficulty
+                    difficulty: difficulty,
+                    questionFormatPreference: formatPreference
                 )
                 if let questionRotationEnabled,
                    questionRotationEnabled != room.activeForQuestions {
@@ -5521,10 +5519,12 @@ struct StudyEditorSheet: View {
 
     var navigationTitle: String
     var initialQuestionRotationEnabled: Bool?
+    var initialQuestionFormatPreference: QuestionFormatPreference?
     var strings: AppStrings
     var onDelete: (() -> Void)?
-    var onSave: (String, Difficulty, Bool?) -> Void
+    var onSave: (String, Difficulty, Bool?, QuestionFormatPreference?) -> Void
 
+    @State private var questionFormatPreference: QuestionFormatPreference
     @State private var title: String
     @State private var difficultyLevel: Double
     @State private var isQuestionRotationEnabled: Bool
@@ -5534,12 +5534,15 @@ struct StudyEditorSheet: View {
         initialTitle: String,
         initialDifficulty: Difficulty,
         initialQuestionRotationEnabled: Bool? = nil,
+        initialQuestionFormatPreference: QuestionFormatPreference? = nil,
         strings: AppStrings,
         onDelete: (() -> Void)? = nil,
-        onSave: @escaping (String, Difficulty, Bool?) -> Void
+        onSave: @escaping (String, Difficulty, Bool?, QuestionFormatPreference?) -> Void
     ) {
         self.navigationTitle = navigationTitle
         self.initialQuestionRotationEnabled = initialQuestionRotationEnabled
+        self.initialQuestionFormatPreference = initialQuestionFormatPreference
+        _questionFormatPreference = State(initialValue: initialQuestionFormatPreference ?? .mixed)
         self.strings = strings
         self.onDelete = onDelete
         self.onSave = onSave
@@ -5576,6 +5579,17 @@ struct StudyEditorSheet: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    }
+                }
+
+                if initialQuestionFormatPreference != nil {
+                    Section {
+                        Picker(strings.questionFormat, selection: $questionFormatPreference) {
+                            ForEach(QuestionFormatPreference.allCases, id: \.self) { preference in
+                                Text(preference.title(strings: strings)).tag(preference)
+                            }
+                        }
+                        Text(strings.questionFormatHelp).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
 
@@ -5617,7 +5631,8 @@ struct StudyEditorSheet: View {
                             Difficulty(level: resolvedDifficulty),
                             initialQuestionRotationEnabled == nil
                                 ? nil
-                                : isQuestionRotationEnabled
+                                : isQuestionRotationEnabled,
+                            initialQuestionFormatPreference == nil ? nil : questionFormatPreference
                         )
                         dismiss()
                     }
@@ -7355,12 +7370,7 @@ private struct MobileLikedQuestionsView: View {
                 }
 
                 ForEach(appState.likedCommunityQuestions) { question in
-                    Button {
-                        selectedQuestion = question
-                    } label: {
-                        MobileCommunityQuestionRow(question: question, strings: strings)
-                    }
-                    .buttonStyle(.plain)
+                    MobileCommunityQuestionRow(question: question, strings: strings, onOpen: { selectedQuestion = question })
                     .onAppear {
                         appState.shouldLoadNextLikedCommunityQuestion(
                             after: question.id,
@@ -10994,23 +11004,47 @@ private struct MobileFeedbackView: View {
 }
 
 private struct MobileCommunityQuestionRow: View {
+    @EnvironmentObject private var appState: AppState
     var question: CommunityQuestion
     var strings: AppStrings
+    var onOpen: (() -> Void)? = nil
+    @State private var showsLogin = false
+
+    private var displayed: CommunityQuestion { appState.currentCommunityQuizQuestion(question) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CommunityQuestionTopMeta(question: question, language: strings.language)
-
-            Text(MarkdownContent.plainText(question.question))
-                .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .truncationMode(.tail)
-
-            CommunityQuestionStatsMeta(question: question, strings: strings)
+            Button { onOpen?() } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    CommunityQuestionTopMeta(question: displayed, language: strings.language)
+                    Text(MarkdownContent.plainText(displayed.question))
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(displayed.questionFormat == .multipleChoice ? nil : 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if displayed.questionFormat == .multipleChoice, let choice = displayed.multipleChoice {
+                MultipleChoiceOptionsView(choice: choice, strings: strings,
+                    isPending: appState.isCommunityChoicePending(questionID: displayed.id),
+                    intent: appState.communityChoiceIntent(questionID: displayed.id),
+                    errorMessage: appState.communityChoiceError(questionID: displayed.id)) { optionID in
+                    guard appState.isCommunitySessionActive else { showsLogin = true; return }
+                    Task { await appState.submitCommunityChoice(displayed, optionID: optionID) }
+                }
+            }
+            Button { onOpen?() } label: {
+                CommunityQuestionStatsMeta(question: displayed, strings: strings)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(isPresented: $showsLogin) {
+            NavigationStack { MobileLoginPage().padding(.horizontal, 16) }.environmentObject(appState)
+        }
     }
 }
 
@@ -11081,6 +11115,9 @@ struct CommunityQuestionDetailView: View {
         isLikeRequestPending || appState.isCommunityQuestionLikeRequestInFlight(questionID: displayQuestion.id)
     }
 
+    private var quizQuestion: CommunityQuestion { appState.currentCommunityQuizQuestion(displayQuestion) }
+    private var canRevealQuizAnswer: Bool { displayQuestion.questionFormat != .multipleChoice || quizQuestion.multipleChoice?.hasAnswered == true }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -11102,7 +11139,23 @@ struct CommunityQuestionDetailView: View {
                     }
                 }
 
-                if let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
+                if displayQuestion.questionFormat == .multipleChoice, let choice = quizQuestion.multipleChoice {
+                    MultipleChoiceOptionsView(choice: choice, strings: strings,
+                        isPending: appState.isCommunityChoicePending(questionID: displayQuestion.id),
+                        intent: appState.communityChoiceIntent(questionID: displayQuestion.id),
+                        errorMessage: appState.communityChoiceError(questionID: displayQuestion.id)) { optionID in
+                        guard appState.isCommunitySessionActive else { isShowingCommunityLogin = true; return }
+                        Task {
+                            await appState.submitCommunityChoice(quizQuestion, optionID: optionID)
+                            if isShowingOriginal, quizQuestion.multipleChoice?.hasAnswered == true,
+                               let original = await loadQuestion(view: .original) {
+                                displayQuestion = original
+                            }
+                        }
+                    }
+                }
+
+                if canRevealQuizAnswer, let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !answer.isEmpty {
                     VStack(alignment: .leading, spacing: 5) {
                         if let voice = displayQuestion.voiceRecord {
@@ -11117,7 +11170,7 @@ struct CommunityQuestionDetailView: View {
                     VoiceRecordFeedbackContent(content: voice, answer: displayQuestion.answer, strings: strings)
                 }
 
-                if let gradingResult = displayQuestion.gradingResult {
+                if canRevealQuizAnswer, let gradingResult = quizQuestion.gradingResult {
                     CommunityMessageBubble(role: .feedback) {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -11274,7 +11327,7 @@ struct CommunityQuestionDetailView: View {
         } message: { user in
             Text(strings.blockUserMessage(user.displayName))
         }
-        .task(id: displayQuestion.id) {
+        .task(id: "\(displayQuestion.id):\(appState.communityQuizSessionGeneration)") {
             if contentSource.showsCommunityInteractions {
                 applyCachedComments()
             }

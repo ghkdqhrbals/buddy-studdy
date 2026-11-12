@@ -12,6 +12,7 @@ import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemComm
 import com.buddystudy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.StudyTreeSelector
+import com.buddystudy.backend.study.application.service.StudyRootResolver
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -74,6 +75,9 @@ class SettingsService(
             val previousIntervalMinutes = study.intervalMinutes
             val previousNextDueAt = study.nextDueAt
             study.deviceId = principal.deviceId
+            if (study.parentStudyId == null) {
+                (item.questionFormatPreference ?: command.questionFormatPreference)?.let { study.questionFormatPreference = it }
+            }
             study.apply(StudyRoomSettings.of(study.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
                     difficultyLevel = item.difficultyLevel,
@@ -119,8 +123,11 @@ class SettingsService(
         val user = users.findById(principal.userId)
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
-        return study.toSettings(user)
-            .copy(openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank())
+        val root = StudyRootResolver(studies, listOf(study)).rootFor(study)
+        return study.toSettings(user).copy(
+            openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank(),
+            questionFormatPreference = root.questionFormatPreference,
+        )
     }
 
     @Transactional
@@ -157,6 +164,9 @@ class SettingsService(
             anonymous = principal.anonymous,
             now = now,
         ))
+        if (study.parentStudyId == null) {
+            command.questionFormatPreference?.let { study.questionFormatPreference = it }
+        }
         study.topic = command.topic.ifBlank { study.topic }
         study.deviceId = principal.deviceId
         if (study.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {

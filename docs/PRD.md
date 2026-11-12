@@ -268,6 +268,13 @@ Voice Tutor selection and display clarifications:
 
 Tapping a public-question row opens its detail. The options and long-press menus do not repeat a View question action, and the options button is hidden when no actions are available. Public-question options are owner-aware. The authenticated backend returns `isOwnedByMe` from the canonical record owner for feed, detail, search and liked pages, including when author profile display data is unavailable. My own question offers Make private and Delete as owner-specific actions; it has no Edit, Report or Block action. Shared discovery actions may also offer topic follow/unfollow and a public link. Other users' questions retain moderation actions. Older responses without the field may use a resolved numeric account/author identity; unknown ownership must not be treated as another author while the profile is loading.
 
+Multiple-choice study questions and inline feed participation follow
+[Multiple-choice questions](MULTIPLE_CHOICE_QUESTIONS.md). Root studies default to
+an equal-probability mix of free-text and objective questions. Objective questions
+have two to four options and one immutable answer per account; after choosing,
+participants see counts, percentages, correctness, and explanation. Public
+participation does not create personal learning records or consume question quota.
+
 1. Home is a public, server-ordered feed with search and optional Following scope; it exposes no Recommended, Latest, Most Viewed, or Most Liked sort controls. Signed-in members can manage up to 30 interest-topic subscriptions independently of their study tree and question quota. Subscriptions are account-owned server data and synchronize across devices; signing out immediately clears the client copy and personalized feed.
 2. The server owns ordering, currently prioritizing subscribed topics and then damped engagement with age decay. Members can filter to followed topics. Legacy v2 `sort` parameters are accepted but ignored, so older clients cannot change the server policy. Filtering, ranking, and pagination happen on the server before returning a 20-question page; private, ungraded, deleted, and blocked-author questions remain excluded. Anonymous visitors receive general recommendations.
 3. Interest management uses a compact sheet with explicit Save, removable selected topics, manual topic entry, and suggestions from available study and public-feed topics. Empty subscriptions and an empty Following feed explain the next action. Failed reads cannot overwrite subscriptions, and a failed save preserves the editable selections for retry.

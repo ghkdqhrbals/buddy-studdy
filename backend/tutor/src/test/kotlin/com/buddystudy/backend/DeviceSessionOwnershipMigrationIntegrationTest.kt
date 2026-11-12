@@ -47,7 +47,11 @@ class DeviceSessionOwnershipMigrationIntegrationTest {
             .load()
 
     private fun MySQLContainer<*>.connection(): Connection =
-        DriverManager.getConnection(jdbcUrl, username, password)
+        DriverManager.getConnection(
+            "$jdbcUrl${if (jdbcUrl.contains('?')) '&' else '?'}connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true",
+            username,
+            password,
+        )
 
     private fun seedSessions(connection: Connection): SeededSessions {
         val oldOwner = connection.insertUser("old-owner")

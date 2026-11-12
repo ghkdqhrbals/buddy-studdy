@@ -2,6 +2,7 @@ package com.buddystudy.backend.localization.application.policy
 
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionFormat
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
@@ -12,7 +13,11 @@ object ContentSourceHashPolicy {
                 question.topic,
                 question.question,
                 question.hint.orEmpty(),
-            ).joinToString("\u001f"),
+            ).let { fields ->
+                if (question.questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+                    fields + listOf(question.questionFormat.name, question.choiceOptionsJson.orEmpty())
+                } else fields
+            }.joinToString("\u001f"),
         )
         val answerHash = question.answer
             ?.takeIf(String::isNotBlank)

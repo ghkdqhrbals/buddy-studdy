@@ -1,6 +1,10 @@
 package com.buddystudy.backend.study.application.service
+import com.buddystudy.study.domain.entity.QuestionFormatPreference
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort
+import com.buddystudy.backend.common.application.port.outbound.LegacyClientQuestionContract
+import com.buddystudy.backend.study.application.model.forQuestionContract
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.StudyPageResponse
@@ -8,6 +12,8 @@ import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyTopicCreationResponse
 import com.buddystudy.backend.study.application.model.StudyTopicsCreationResponse
+import com.buddystudy.backend.study.application.model.StudyRecordResponse
+import com.buddystudy.backend.study.application.model.TranslationViewMode
 import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
@@ -48,6 +54,7 @@ class StudySyncService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val contentLocalizations: ContentLocalizationPort,
+    private val clientContract: ClientQuestionContractPort = LegacyClientQuestionContract,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
     override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse =
@@ -89,7 +96,7 @@ class StudySyncService(
         if (parentStudyId <= 0 || limit !in 1..500 || offset < 0) {
             throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Invalid child study page.")
         }
-        studies.findByIdAndUserId(parentStudyId, principal.userId)
+        val parent = studies.findByIdAndUserId(parentStudyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
         val page = studies.findByUserIdAndParentStudyId(
             userId = principal.userId,
@@ -98,7 +105,7 @@ class StudySyncService(
             pageable = ChildStudyPageable(limit, offset.toLong()),
         )
         return StudyPageResponse(
-            studies = page.content.toStudyRoomResponses(QuestionLanguage.normalize(language)),
+            studies = page.content.toStudyRoomResponses(QuestionLanguage.normalize(language), listOf(parent)),
             totalCount = page.totalElements,
             limit = limit,
             offset = offset,
@@ -123,10 +130,14 @@ class StudySyncService(
             .takeIf { it.isNotEmpty() }
             ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
             .orEmpty()
+        val effectivePreference = StudyRootResolver(studies, listOf(study)).rootFor(study).questionFormatPreference
         return study.toStudyRoomResponse(
-            pendingQuestion = pendingQuestion,
-            latestQuestion = latestQuestion,
+            effectiveQuestionFormatPreference = effectivePreference,
+            pendingQuestion = pendingQuestion?.entity,
+            latestQuestion = latestQuestion?.entity,
             statsByQuestionId = statsByQuestionId,
+            pendingQuestionResponse = pendingQuestion?.withStats(statsByQuestionId[pendingQuestion.id]),
+            latestQuestionResponse = latestQuestion?.withStats(statsByQuestionId[latestQuestion.id]),
         )
     }
 
@@ -296,6 +307,7 @@ class StudySyncService(
                 customPrompt = rootStudy.customPrompt,
                 openaiModel = rootStudy.openaiModel,
                 maxHistoryCount = rootStudy.maxHistoryCount,
+                questionFormatPreference = rootStudy.questionFormatPreference,
             ),
             parentStudy = parentStudy,
             sortOrder = command.sortOrder,
@@ -392,7 +404,8 @@ class StudySyncService(
                 "The study name, level, or parent changed before this update. Review the current study and try again.",
             )
         }
-        return saved.toStudyRoomResponse()
+        val root = StudyRootResolver(studies, listOf(saved)).rootFor(saved)
+        return saved.toStudyRoomResponse(effectiveQuestionFormatPreference = root.questionFormatPreference)
     }
 
     private suspend fun lockStudyOwner(userId: Long) {
@@ -440,7 +453,9 @@ class StudySyncService(
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
         }
         if (duplicate != null && parentStudy != null && duplicateBelongsToRequestedParent) {
-            return SavedStudyOutcome(duplicate.toStudyRoomResponse(), created = false)
+            return SavedStudyOutcome(duplicate.toStudyRoomResponse(
+                effectiveQuestionFormatPreference = command.questionFormatPreference ?: duplicate.questionFormatPreference,
+            ), created = false)
         }
         if (parentStudy != null) requireCanAddChild(parentStudy, allStudies)
         val study = duplicate ?: StudyEntity(
@@ -457,6 +472,9 @@ class StudySyncService(
         val previousIntervalMinutes = study.intervalMinutes
         val previousNextDueAt = study.nextDueAt
 
+        if (parentStudy == null) {
+            command.questionFormatPreference?.let { study.questionFormatPreference = it }
+        }
         study.topic = topic
         study.deviceId = principal.deviceId
         study.parentStudyId = parentStudy?.id
@@ -494,7 +512,9 @@ class StudySyncService(
             saved.reschedule(now)
             saved = studies.save(saved)
         }
-        return SavedStudyOutcome(saved.toStudyRoomResponse(), created = isNewStudy)
+        return SavedStudyOutcome(saved.toStudyRoomResponse(
+            effectiveQuestionFormatPreference = command.questionFormatPreference ?: saved.questionFormatPreference,
+        ), created = isNewStudy)
     }
 
     private fun requireCanAddChild(parentStudy: StudyEntity, allStudies: List<StudyEntity>) {
@@ -531,7 +551,10 @@ class StudySyncService(
         }
     }
 
-    private suspend fun List<StudyEntity>.toStudyRoomResponses(language: String): List<StudyRoomResponse> {
+    private suspend fun List<StudyEntity>.toStudyRoomResponses(
+        language: String,
+        knownAncestors: Collection<StudyEntity> = emptyList(),
+    ): List<StudyRoomResponse> {
         if (isEmpty()) return emptyList()
         val pendingByStudyId = questions
             .findLatestPendingByStudyIdsAndLanguage(map { it.id }, language)
@@ -541,20 +564,77 @@ class StudySyncService(
             .takeIf { it.isNotEmpty() }
             ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
             .orEmpty()
+        val roots = StudyRootResolver(studies, this + knownAncestors)
         return map { study ->
             val pendingQuestion = pendingByStudyId[study.id]?.localizedForDisplay(language)
             study.toStudyRoomResponse(
-                pendingQuestion = pendingQuestion,
+                effectiveQuestionFormatPreference = roots.rootFor(study).questionFormatPreference,
+                pendingQuestion = pendingQuestion?.entity,
                 statsByQuestionId = statsByQuestionId,
+                pendingQuestionResponse = pendingQuestion?.withStats(statsByQuestionId[pendingQuestion.id]),
             )
         }
     }
 
-    private suspend fun QuestionEntity.localizedForDisplay(language: String): QuestionEntity =
-        if (source == com.buddystudy.study.domain.entity.QuestionSource.CUSTOM_QUESTION) this else applyReadyQuestionLocalization(
-            contentLocalizations.record(id, language),
-            language,
+    private suspend fun QuestionEntity.localizedForDisplay(language: String): LocalizedRoomQuestion {
+        val target = QuestionLanguage.normalize(language)
+        if (source == com.buddystudy.study.domain.entity.QuestionSource.CUSTOM_QUESTION) {
+            return LocalizedRoomQuestion(this, toStudyRecord().toProjection().toRecordResponse(
+                requestedLanguage = target, viewMode = TranslationViewMode.ORIGINAL,
+            ).forQuestionContract(clientContract.currentVersion()))
+        }
+        val questionSource = sourceLanguage.databaseValue
+        val answerSource = (answerSourceLanguage ?: sourceLanguage).databaseValue
+        val aiSource = (aiResponseSourceLanguage ?: sourceLanguage).databaseValue
+        val hasAiContent = !feedback.isNullOrBlank() || !explanation.isNullOrBlank() || !gradingAssessmentJson.isNullOrBlank()
+        if (questionSource == target && (answer.isNullOrBlank() || answerSource == target) && (!hasAiContent || aiSource == target)) {
+            return LocalizedRoomQuestion(this, toStudyRecord().toProjection().toRecordResponse(
+                requestedLanguage = target,
+                questionTranslationPending = false,
+                answerTranslationPending = false,
+                aiResponseTranslationPending = false,
+            ).forQuestionContract(clientContract.currentVersion()))
+        }
+        // Capture source hashes and locales before applying display-only translations.
+        val hashes = com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy.recordHashes(this)
+        val snapshot = contentLocalizations.record(id, target)
+        val questionReady = snapshot.question?.takeIf { it.status == "READY" && it.sourceHash == hashes.question }
+        val answerReady = snapshot.answer?.takeIf { it.status == "READY" && it.sourceHash == hashes.answer }
+        val aiReady = snapshot.aiResponse?.takeIf { it.status == "READY" && it.sourceHash == hashes.aiResponse }
+        applyReadyQuestionLocalization(snapshot, target)
+        if (answerSource != target) {
+            answerReady?.let { answer = it.fields["answer"] ?: answer }
+        }
+        if (aiSource != target) {
+            aiReady?.let { localized ->
+                feedback = localized.fields["feedback"] ?: feedback
+                explanation = localized.fields["explanation"] ?: explanation
+                gradingAssessmentJson = localized.fields["assessmentJson"] ?: gradingAssessmentJson
+            }
+        }
+        val questionDisplay = if (questionSource != target && questionReady != null) target else questionSource
+        val answerDisplay = if (answerSource != target && answerReady != null) target else answerSource
+        val aiDisplay = if (aiSource != target && aiReady != null) target else aiSource
+        return LocalizedRoomQuestion(this, toStudyRecord().toProjection().toRecordResponse(
+            requestedLanguage = target,
+            questionDisplayLanguage = questionDisplay,
+            answerDisplayLanguage = answerDisplay,
+            aiResponseDisplayLanguage = aiDisplay,
+            questionTranslationPending = questionSource != target && questionReady == null && snapshot.question?.status != "FAILED",
+            answerTranslationPending = answerSource != target && answerReady == null && snapshot.answer?.status != "FAILED",
+            aiResponseTranslationPending = aiSource != target && aiReady == null && snapshot.aiResponse?.status != "FAILED",
+        ).forQuestionContract(clientContract.currentVersion()))
+    }
+
+    private data class LocalizedRoomQuestion(val entity: QuestionEntity, val response: StudyRecordResponse) {
+        val id: Long get() = entity.id
+
+        fun withStats(stats: QuestionStatsEntity?) = response.copy(
+            likeCount = stats?.likeCount ?: 0,
+            commentCount = stats?.commentCount ?: 0,
+            viewCount = stats?.viewCount ?: 0,
         )
+    }
 
 }
 
@@ -562,11 +642,14 @@ internal suspend fun StudyEntity.toStudyRoomResponse(
     pendingQuestion: QuestionEntity? = null,
     latestQuestion: QuestionEntity? = null,
     statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
+    effectiveQuestionFormatPreference: QuestionFormatPreference = questionFormatPreference,
+    pendingQuestionResponse: StudyRecordResponse? = null,
+    latestQuestionResponse: StudyRecordResponse? = null,
 ): StudyRoomResponse {
-    val pending = pendingQuestion?.let { question ->
+    val pending = pendingQuestionResponse ?: pendingQuestion?.let { question ->
         question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
     }
-    val latest = latestQuestion?.let { question ->
+    val latest = latestQuestionResponse ?: latestQuestion?.let { question ->
         question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
     }
 
@@ -591,6 +674,7 @@ internal suspend fun StudyEntity.toStudyRoomResponse(
         createdAt = createdAt,
         updatedAt = updatedAt,
         curriculumTerminal = curriculumTerminal,
+        questionFormatPreference = effectiveQuestionFormatPreference,
     )
 }
 

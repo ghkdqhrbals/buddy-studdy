@@ -1,4 +1,6 @@
 package com.buddystudy.backend.study.adapter.outbound.openai
+import com.buddystudy.study.domain.entity.QuestionFormat
+import com.buddystudy.backend.study.application.model.QuestionChoiceOption
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -89,6 +91,22 @@ class OpenAIRequestExecutor(
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
         val question = parsed["question"]?.toString()?.takeIf { it.isNotBlank() }
             ?: "Explain one key idea about ${prompt.fallbackTopic}."
+        if (prompt.questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+            val options = (parsed["options"] as? List<*>)?.map { value ->
+                val option = value as? Map<*, *> ?: error("Invalid multiple-choice option.")
+                QuestionChoiceOption(
+                    id = option["id"] as? String ?: error("Missing multiple-choice option ID."),
+                    text = (option["text"] as? String)?.trim() ?: error("Missing multiple-choice option text."),
+                )
+            }.orEmpty()
+            return GeneratedQuestion(
+                question = parsed["question"] as? String ?: "",
+                hint = parsed["expectedAnswerHint"] as? String,
+                options = options,
+                correctOptionId = parsed["correctOptionId"] as? String,
+                explanation = parsed["explanation"] as? String,
+            ).also { it.validateMultipleChoice() }
+        }
         val rubric = parseGradingRubric(parsed["rubric"])
             ?: generateRubric(
                 apiKey = apiKey,

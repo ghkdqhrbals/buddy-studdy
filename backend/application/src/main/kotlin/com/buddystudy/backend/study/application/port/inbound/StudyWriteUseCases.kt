@@ -193,6 +193,10 @@ data class CompletedAnswerGrading(
 )
 
 interface AnswerGradingWriteUseCase {
+    suspend fun queueChoice(
+        userId: Long, recordId: Long, selectedOptionId: String, aiResponseLanguage: String, now: Instant,
+    ): QueuedAnswerGrading = error("Multiple choice answers are not implemented.")
+
     suspend fun queue(
         userId: Long,
         recordId: Long,

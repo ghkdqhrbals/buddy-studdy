@@ -932,6 +932,10 @@ final class AppState: ObservableObject {
     @Published private var communityFeedState = CommunityFeedStateStore()
     @Published private var likedQuestionsState = LikedQuestionsStateStore()
     @Published private var communityQuestionLikeRequestState = CommunityQuestionLikeRequestStore()
+    @Published private var communityChoiceRequestState = CommunityQuestionLikeRequestStore()
+    @Published private var communityChoiceResults: [String: CommunityQuestion] = [:]
+    @Published private var communityChoiceIntents: [String: String] = [:]
+    @Published private var communityChoiceErrors: [String: String] = [:]
     @Published private var communityProfileState = CommunityProfileStateStore()
     @Published private(set) var avatarCatalog: AvatarCatalogResponse?
     @Published private(set) var isLoadingAvatarCatalog = false
@@ -4148,6 +4152,7 @@ final class AppState: ObservableObject {
                 difficulty: Difficulty(level: room.difficultyLevel),
                 customPrompt: room.customPrompt,
                 openAIModel: room.openAIModel,
+                questionFormatPreference: room.questionFormatPreference,
                 createdAt: existing?.createdAt ?? room.createdAt
             )
         }
@@ -4314,6 +4319,7 @@ final class AppState: ObservableObject {
                     difficulty: Difficulty(level: room.difficultyLevel),
                     customPrompt: room.customPrompt,
                     openAIModel: room.openAIModel,
+                    questionFormatPreference: room.questionFormatPreference,
                     createdAt: existing?.createdAt ?? room.createdAt
                 )
             })
@@ -4436,7 +4442,7 @@ final class AppState: ObservableObject {
     ) {
         var nextState = communityFeedState
         nextState.applyPage(
-            response,
+            communityResponseForCurrentSession(response),
             offset: offset,
             reset: reset,
             allowsNativeAdSlots: allowsNativeAdSlots
@@ -5061,6 +5067,9 @@ final class AppState: ObservableObject {
                         offset: normalizedOffset
                     )
                 )
+                for question in response.questions where question.multipleChoice?.hasAnswered == true && !communityChoiceRequestState.contains(questionID: question.id) {
+                    communityChoiceResults[question.id] = question
+                }
                 if reset {
                     AppAnalytics.publicFeedLoaded(
                         scope: requestedScope.rawValue,
@@ -5177,8 +5186,11 @@ final class AppState: ObservableObject {
             onSuccess: { response in
                 guard isCurrent(), !Task.isCancelled, likedQuestionsState.isCurrentRequest(requestID) else { return }
                 var loadedState = likedQuestionsState
-                loadedState.applyPage(response, offset: normalizedOffset, reset: reset)
+                loadedState.applyPage(communityResponseForCurrentSession(response), offset: normalizedOffset, reset: reset)
                 likedQuestionsState = loadedState
+                for question in response.questions where question.multipleChoice?.hasAnswered == true && !communityChoiceRequestState.contains(questionID: question.id) {
+                    communityChoiceResults[question.id] = question
+                }
             },
             onFailure: { error in
                 guard isCurrent(), !Self.isCancellationLikeError(error), likedQuestionsState.isCurrentRequest(requestID) else { return }
@@ -6134,6 +6146,10 @@ final class AppState: ObservableObject {
     }
 
     private func resetLikedQuestionsTransientState() {
+        communityChoiceRequestState.reset()
+        communityChoiceResults = [:]
+        communityChoiceIntents = [:]
+        communityChoiceErrors = [:]
         var nextLikedState = likedQuestionsState
         nextLikedState.reset()
         likedQuestionsState = nextLikedState
@@ -6986,6 +7002,110 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func communityResponseForCurrentSession(_ original: CommunityQuestionsResponse) -> CommunityQuestionsResponse {
+        var response = original
+        response.questions = response.questions.map { question in
+            var stamped = question
+            stamped.viewerSessionGeneration = communitySessionState.generation
+            return stamped
+        }
+        response.items = response.items.map { item in
+            guard case .publicQuestion(var question) = item else { return item }
+            question.viewerSessionGeneration = communitySessionState.generation
+            return .publicQuestion(question)
+        }
+        return response
+    }
+
+    func currentCommunityQuizQuestion(_ question: CommunityQuestion) -> CommunityQuestion {
+        if !isCommunitySessionActive || question.viewerSessionGeneration.map({ $0 != communitySessionState.generation }) == true {
+            var hidden = question
+            if var choice = hidden.multipleChoice {
+                choice.selectedOptionId = nil
+                choice.totalParticipants = nil
+                choice.correctOptionId = nil
+                choice.isCorrect = nil
+                choice.explanation = nil
+                choice.options = choice.options.map { option in
+                    var hidden = option
+                    hidden.count = nil
+                    hidden.percentage = nil
+                    return hidden
+                }
+                hidden.multipleChoice = choice
+                hidden.answer = nil
+                hidden.gradingResult = nil
+            }
+            return hidden
+        }
+        // A fresh accepted server snapshot owns its counts and reactions. Only overlay a
+        // successful choice onto a stale pre-answer card/detail that is still on screen.
+        guard question.multipleChoice?.hasAnswered != true,
+              let accepted = communityChoiceResults[question.id]?.multipleChoice else { return question }
+        var displayed = question
+        displayed.multipleChoice = question.multipleChoice?.applyingParticipation(accepted) ?? accepted
+        return displayed
+    }
+
+    var communityQuizSessionGeneration: UInt64 { communitySessionState.generation }
+
+    func isCommunityChoicePending(questionID: String) -> Bool { communityChoiceRequestState.contains(questionID: questionID) }
+    func communityChoiceIntent(questionID: String) -> String? { communityChoiceIntents[questionID] }
+    func communityChoiceError(questionID: String) -> String? { communityChoiceErrors[questionID] }
+
+    private func applyCommunityQuizQuestion(_ original: CommunityQuestion) {
+        var question = original
+        question.viewerSessionGeneration = communitySessionState.generation
+        communityChoiceResults[question.id] = question
+        func applyingChoice(to current: CommunityQuestion) -> CommunityQuestion {
+            var merged = current
+            merged.questionFormat = question.questionFormat
+            if let result = question.multipleChoice {
+                merged.multipleChoice = current.multipleChoice?.applyingParticipation(result) ?? result
+            }
+            merged.answer = question.answer
+            merged.gradingResult = question.gradingResult
+            merged.viewerSessionGeneration = question.viewerSessionGeneration
+            return merged
+        }
+        if let index = communityQuestions.firstIndex(where: { $0.id == question.id }) {
+            communityQuestions[index] = applyingChoice(to: communityQuestions[index])
+        }
+        if let index = likedQuestionsState.questions.firstIndex(where: { $0.id == question.id }) {
+            likedQuestionsState.questions[index] = applyingChoice(to: likedQuestionsState.questions[index])
+        }
+        if question.multipleChoice?.hasAnswered == true { communityChoiceIntents.removeValue(forKey: question.id) }
+    }
+
+    func submitCommunityChoice(_ original: CommunityQuestion, optionID: String) async {
+        let question = currentCommunityQuizQuestion(original)
+        guard isCommunitySessionActive,
+              question.questionFormat == .multipleChoice,
+              question.multipleChoice?.hasAnswered != true,
+              question.multipleChoice?.options.contains(where: { $0.id == optionID }) == true,
+              communityChoiceIntents[question.id].map({ $0 == optionID }) ?? true,
+              let requestID = communityChoiceRequestState.begin(questionID: question.id) else { return }
+        let generation = communitySessionState.generation
+        communityChoiceIntents[question.id] = optionID
+        communityChoiceErrors.removeValue(forKey: question.id)
+        defer { communityChoiceRequestState.finish(questionID: question.id, requestID: requestID) }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-choice"),
+              isCurrentCommunitySession(generation) else { return }
+        do {
+            let updated = try await communityUseCase.voteQuestion(registration: registration, questionID: question.id, selectedOptionId: optionID, language: settings.appLanguage)
+            guard isCurrentCommunitySession(generation), communityChoiceRequestState.isCurrent(questionID: question.id, requestID: requestID) else { return }
+            applyCommunityQuizQuestion(updated)
+        } catch {
+            guard isCurrentCommunitySession(generation), communityChoiceRequestState.isCurrent(questionID: question.id, requestID: requestID) else { return }
+            if let updated = try? await communityUseCase.fetchPublicQuestion(registration: registration, questionID: question.id, language: settings.appLanguage, view: .localized),
+               isCurrentCommunitySession(generation), updated.multipleChoice?.hasAnswered == true {
+                applyCommunityQuizQuestion(updated)
+            } else if isCurrentCommunitySession(generation) {
+                communityChoiceErrors[question.id] = strings.choiceSubmissionFailed
+            }
+        }
+    }
+
     func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {
         guard isCommunitySessionActive else {
             return nil
@@ -7150,6 +7270,7 @@ final class AppState: ObservableObject {
             return nil
         }
 
+        let sessionGeneration = communitySessionState.generation
         let question = await actionRunner.run(
             operation: {
                 let result = try await useCase.fetchPublicQuestion(
@@ -7168,14 +7289,16 @@ final class AppState: ObservableObject {
                 log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
             }
         )
-        guard isCurrent(), let question, question.canPublish,
+        guard isCurrent(), var question, question.canPublish,
               !communityFeedState.isAuthorHidden(question.author?.id) else {
             return nil
         }
+        question.viewerSessionGeneration = sessionGeneration
         if view == .localized,
            let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
             communityQuestions[index] = question
         }
+        if view == .localized, question.multipleChoice?.hasAnswered == true { applyCommunityQuizQuestion(question) }
         return question
     }
 
@@ -7721,7 +7844,8 @@ final class AppState: ObservableObject {
         _ title: String,
         difficulty: Difficulty? = nil,
         customPrompt: String? = nil,
-        openAIModel: String? = nil
+        openAIModel: String? = nil,
+        questionFormatPreference: QuestionFormatPreference = .mixed
     ) {
         let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
@@ -7732,7 +7856,8 @@ final class AppState: ObservableObject {
             title: raw,
             difficulty: difficulty ?? settings.difficulty,
             customPrompt: customPrompt ?? StudySettings.defaultCustomPrompt,
-            openAIModel: openAIModel ?? settings.sanitizedOpenAIModel
+            openAIModel: openAIModel ?? settings.sanitizedOpenAIModel,
+            questionFormatPreference: questionFormatPreference
         )
         locallyDeletedStudyTopicKeys.remove(Self.normalizedCategoryText(for: raw))
         let nextSettings = StudySettings(
@@ -7766,7 +7891,8 @@ final class AppState: ObservableObject {
         id: String,
         title: String,
         difficulty: Difficulty,
-        syncBackendSchedule: Bool = true
+        syncBackendSchedule: Bool = true,
+        questionFormatPreference: QuestionFormatPreference? = nil
     ) {
         guard let category = settings.studyCategories.first(where: { $0.id == id }) else {
             return
@@ -7777,7 +7903,8 @@ final class AppState: ObservableObject {
             difficulty: difficulty,
             customPrompt: category.customPrompt,
             openAIModel: category.sanitizedOpenAIModel,
-            syncBackendSchedule: syncBackendSchedule
+            syncBackendSchedule: syncBackendSchedule,
+            questionFormatPreference: questionFormatPreference ?? category.questionFormatPreference
         )
     }
 
@@ -7787,7 +7914,8 @@ final class AppState: ObservableObject {
         difficulty: Difficulty,
         customPrompt: String,
         openAIModel: String,
-        syncBackendSchedule: Bool = true
+        syncBackendSchedule: Bool = true,
+        questionFormatPreference: QuestionFormatPreference? = nil
     ) {
         let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
@@ -7806,6 +7934,7 @@ final class AppState: ObservableObject {
                 difficulty: difficulty,
                 customPrompt: customPrompt,
                 openAIModel: openAIModel,
+                questionFormatPreference: questionFormatPreference ?? category.questionFormatPreference,
                 createdAt: category.createdAt
             )
         }
@@ -7837,13 +7966,21 @@ final class AppState: ObservableObject {
         if nextSettings.selectedStudyCategoryID == id {
             activateStudyContext(forTopic: nextSettings.topic)
         }
+        // The legacy bulk schedule payload does not own a root's format preference.
+        if syncBackendSchedule, questionFormatPreference != nil,
+           let studyID = Int(id), let editedCategory {
+            Task { [weak self] in
+                await self?.updateBackendStudyIfPossible(editedCategory, studyID: studyID, settings: nextSettings)
+            }
+        }
         statusMessage = nil
     }
 
     func updateStudyTreeCategory(
         roomID: Int,
         title: String,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        questionFormatPreference: QuestionFormatPreference? = nil
     ) {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedTitle.isEmpty,
@@ -7857,11 +7994,13 @@ final class AppState: ObservableObject {
             difficulty: difficulty,
             customPrompt: questionSettings.customPrompt,
             openAIModel: questionSettings.openAIModel,
+            questionFormatPreference: room.parentStudyId == nil ? (questionFormatPreference ?? room.questionFormatPreference) : questionSettings.questionFormatPreference,
             createdAt: room.createdAt
         )
         var optimisticRoom = room
         optimisticRoom.topic = normalizedTitle
         optimisticRoom.difficultyLevel = difficulty.level
+        optimisticRoom.questionFormatPreference = updatedCategory.questionFormatPreference
         studyRoomState.upsertStudy(optimisticRoom)
         updateStudyCategory(
             id: updatedCategory.id,
@@ -7869,7 +8008,8 @@ final class AppState: ObservableObject {
             difficulty: updatedCategory.difficulty,
             customPrompt: updatedCategory.customPrompt,
             openAIModel: updatedCategory.openAIModel,
-            syncBackendSchedule: false
+            syncBackendSchedule: false,
+            questionFormatPreference: updatedCategory.questionFormatPreference
         )
 
         let currentSettings = settings
@@ -7979,7 +8119,8 @@ final class AppState: ObservableObject {
                     title: raw,
                     difficulty: difficulty,
                     customPrompt: customPrompt,
-                    openAIModel: openAIModel
+                    openAIModel: openAIModel,
+                    questionFormatPreference: rootStudyRoom(for: parentStudyID)?.questionFormatPreference ?? backendStudyRoom(id: parentStudyID)?.questionFormatPreference ?? .mixed
                 )
             )
         }
@@ -8433,6 +8574,7 @@ final class AppState: ObservableObject {
                 difficulty: Difficulty(level: room.difficultyLevel),
                 customPrompt: room.customPrompt,
                 openAIModel: room.openAIModel,
+                questionFormatPreference: room.questionFormatPreference,
                 createdAt: room.createdAt
             )
     }
@@ -10233,16 +10375,30 @@ final class AppState: ObservableObject {
         }
     }
 
+    func studyChoiceIntent(for record: StudyRecord) -> String? {
+        record.question.multipleChoice?.selectedOptionId ?? localStudyRecordUseCase.loadChoiceDraft(recordID: record.id)
+    }
+
+    func submitStudyChoice(_ record: StudyRecord, optionID: String, pollingOwnerID: String) async {
+        guard record.isQuestion, !record.isDetachedLocalQuestion,
+              record.question.questionFormat == .multipleChoice,
+              record.question.multipleChoice?.hasValidOptions == true,
+              record.question.multipleChoice?.options.contains(where: { $0.id == optionID }) == true,
+              studyChoiceIntent(for: record).map({ $0 == optionID }) ?? true else { return }
+        await gradeStudyRoomRecord(record, answer: "", pollingOwnerID: pollingOwnerID, selectedOptionId: optionID)
+    }
+
     func gradeStudyRoomRecord(
         _ record: StudyRecord,
         answer submittedAnswer: String,
-        pollingOwnerID suppliedPollingOwnerID: String? = nil
+        pollingOwnerID suppliedPollingOwnerID: String? = nil,
+        selectedOptionId: String? = nil
     ) async {
         let pollingOwnerID = suppliedPollingOwnerID ?? appIdentifierProvider.makeIdentifier()
         flushPendingAnswerDraftSave()
 
         let trimmedAnswer = submittedAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAnswer.isEmpty else {
+        guard !trimmedAnswer.isEmpty || selectedOptionId != nil else {
             errorMessage = "답변을 입력하세요."
             return
         }
@@ -10261,7 +10417,11 @@ final class AppState: ObservableObject {
 
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
-        localStudyRecordUseCase.saveAnswerDraft(submittedAnswer, recordID: record.id)
+        if let selectedOptionId {
+            localStudyRecordUseCase.saveChoiceDraft(selectedOptionId, recordID: record.id)
+        } else {
+            localStudyRecordUseCase.saveAnswerDraft(submittedAnswer, recordID: record.id)
+        }
         log(.info, "학습룸 질문 답변 채점 요청을 전송합니다. recordID=\(record.id)")
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-study-room-answer") else {
@@ -10274,15 +10434,18 @@ final class AppState: ObservableObject {
 
         await actionRunner.run(
             operation: {
-                let queued = try await recordsUseCase.gradeRecord(
-                    registration: registration,
-                    recordID: record.id,
-                    answer: trimmedAnswer,
-                    sourceLanguage: ContentLanguageRecognizer.detect(
-                        trimmedAnswer,
-                        fallback: settings.appLanguage
+                let queued: StudyRecord
+                if let selectedOptionId {
+                    queued = try await recordsUseCase.submitChoice(registration: registration, recordID: record.id, selectedOptionId: selectedOptionId, sourceLanguage: settings.appLanguage.backendCode)
+                } else {
+                    queued = try await recordsUseCase.gradeRecord(
+                        registration: registration,
+                        recordID: record.id,
+                        answer: trimmedAnswer,
+                        sourceLanguage: ContentLanguageRecognizer.detect(trimmedAnswer, fallback: settings.appLanguage)
                     )
-                )
+                }
+                guard isAnswerGradingSessionCurrent(sessionGeneration) else { throw CancellationError() }
                 persistAcceptedAnswerGrading(queued)
                 AppAnalytics.answerSubmitted()
                 try Task.checkCancellation()
@@ -10298,7 +10461,7 @@ final class AppState: ObservableObject {
             },
             onSuccess: { updatedRecord in
                 AppAnalytics.answerGradingCompleted()
-                applyStudyRoomRecord(updatedRecord, answer: submittedAnswer)
+                applyStudyRoomRecord(updatedRecord, answer: updatedRecord.answer ?? submittedAnswer)
                 await syncRemotePushScheduleIfPossible(reason: "grade")
             },
             onFailure: { error in
@@ -11515,6 +11678,7 @@ final class AppState: ObservableObject {
                 difficulty: Difficulty(level: room.difficultyLevel),
                 customPrompt: room.customPrompt,
                 openAIModel: room.openAIModel,
+                questionFormatPreference: room.questionFormatPreference,
                 createdAt: room.createdAt
             )
         }
@@ -12084,10 +12248,10 @@ final class AppState: ObservableObject {
 
     private func persistAcceptedAnswerGrading(_ queuedRecord: StudyRecord) {
         var acceptedRecord = queuedRecord
-        if acceptedRecord.gradingStatus == nil {
-            acceptedRecord.gradingStatus = .queued
+        if acceptedRecord.gradingResult == nil {
+            if acceptedRecord.gradingStatus == nil { acceptedRecord.gradingStatus = .queued }
+            acceptedRecord.questionStatus = .grading
         }
-        acceptedRecord.questionStatus = .grading
         if acceptedRecord.studyID == nil {
             acceptedRecord.studyID = studyRecords.first(where: { $0.id == acceptedRecord.id })?.studyID
         }

@@ -16,6 +16,9 @@ import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyRecordType
+import com.buddystudy.study.domain.entity.QuestionFormat
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
+import com.buddystudy.backend.study.application.model.QuestionChoiceOption
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -40,6 +43,54 @@ class ContentTranslationProcessorTest {
                 contentId = 58, targetLanguage = "en", sourceHash = hash!!, requestedAt = Instant.now()))
         }
         assertThat(translator.callCount).isZero()
+    }
+
+    @Test
+    fun `question translation preserves choice identity without translating the answer key`() = runBlocking {
+        val codec = QuestionChoiceCodec()
+        val question = question().apply {
+            questionFormat = QuestionFormat.MULTIPLE_CHOICE
+            choiceOptionsJson = codec.encode(listOf(QuestionChoiceOption("a", "인덱스"), QuestionChoiceOption("b", "전체 검색")))
+            correctOptionId = "a"
+            choiceExplanation = "정답은 인덱스입니다."
+        }
+        val questions = Mockito.mock(QuestionPort::class.java)
+        Mockito.`when`(questions.findQuestionById(question.id)).thenReturn(question)
+        val translator = RecordingContentTranslator()
+        var saved: ContentTranslationResult? = null
+        val localizations = object : EmptyContentLocalizationPort() {
+            override suspend fun saveQuestionReady(
+                question: QuestionEntity,
+                targetLanguage: String,
+                sourceHash: String,
+                result: ContentTranslationResult,
+                now: Instant,
+            ): Boolean {
+                saved = result
+                return true
+            }
+        }
+        ContentTranslationProcessor(questions, Mockito.mock(QuestionCommentPort::class.java), localizations,
+            translator, RecordingStreamInbox(shouldClaim = true)).process(questionEvent(question))
+
+        assertThat(translator.fields.keys).contains("choice_a", "choice_b")
+        assertThat(translator.fields.values).doesNotContain(question.choiceExplanation, question.correctOptionId)
+        assertThat(codec.decode(saved!!.fields["choiceOptionsJson"]))
+            .containsExactly(QuestionChoiceOption("a", "translated:인덱스"), QuestionChoiceOption("b", "translated:전체 검색"))
+        Unit
+    }
+
+    @Test
+    fun `choice labels affect only multiple choice question hashes`() {
+        val question = question()
+        val originalHash = ContentSourceHashPolicy.recordHashes(question).question
+        question.choiceOptionsJson = "[{\"id\":\"a\",\"text\":\"Index\"}]"
+        assertThat(ContentSourceHashPolicy.recordHashes(question).question).isEqualTo(originalHash)
+        question.questionFormat = QuestionFormat.MULTIPLE_CHOICE
+        val multipleChoiceHash = ContentSourceHashPolicy.recordHashes(question).question
+        assertThat(multipleChoiceHash).isNotEqualTo(originalHash)
+        question.choiceOptionsJson = "[{\"id\":\"a\",\"text\":\"Scan\"}]"
+        assertThat(ContentSourceHashPolicy.recordHashes(question).question).isNotEqualTo(multipleChoiceHash)
     }
 
     @Test

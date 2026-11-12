@@ -22,7 +22,9 @@ data class BuddyStudyProperties(
     var mcp: Mcp = Mcp(),
     var referral: Referral = Referral(),
     var voiceTutor: VoiceTutor = VoiceTutor(),
+    var multipleChoice: MultipleChoice = MultipleChoice(),
 ) {
+    data class MultipleChoice(var enabled: Boolean = true)
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
     data class Scheduler(

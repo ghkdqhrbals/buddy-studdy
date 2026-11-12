@@ -12,6 +12,7 @@ data class ScheduleItemRequest @JsonCreator constructor(
     @field:Min(1) @field:Max(10) @JsonProperty("difficultyLevel") val difficultyLevel: Int = 5,
     @JsonProperty("customPrompt") val customPrompt: String? = null,
     @JsonProperty("openaiModel") val openaiModel: String = "gpt-5.4",
+    @JsonProperty("questionFormatPreference") val questionFormatPreference: com.buddystudy.study.domain.entity.QuestionFormatPreference? = null,
 )
 
 data class ScheduleRequest @JsonCreator constructor(
@@ -26,4 +27,5 @@ data class ScheduleRequest @JsonCreator constructor(
     @JsonProperty("openaiModel") val openaiModel: String = "gpt-5.4",
     @field:Min(10) @field:Max(10_000) @JsonProperty("maxHistoryCount") val maxHistoryCount: Int = 100,
     @field:Valid @JsonProperty("schedules") val schedules: List<ScheduleItemRequest>? = null,
+    @JsonProperty("questionFormatPreference") val questionFormatPreference: com.buddystudy.study.domain.entity.QuestionFormatPreference? = null,
 )

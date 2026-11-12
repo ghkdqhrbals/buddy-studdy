@@ -54,6 +54,8 @@ class StudyLearningProgressNotificationsTest {
                 idempotency_key varchar(191), quota_period_started_at timestamp(6), quota_refunded_at timestamp(6),
                 failed_step varchar(32), error_code varchar(80), error_message varchar(1000),
                 created_at timestamp(6), updated_at timestamp(6), completed_at timestamp(6), rollback_completed_at timestamp(6),
+                parent_record_id bigint, root_record_id bigint, follow_up_depth int not null default 0,
+                question_format varchar(32) not null default 'FREE_TEXT',
                 unique(user_id, idempotency_key)
             )
             """,

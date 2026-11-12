@@ -82,6 +82,62 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
 
     private val client = HttpClient.newHttpClient()
 
+    @Test
+    fun `legacy and version three HTTP clients coexist with the same pending objective question`(): Unit = runBlocking {
+        val owner = registerActiveUser("question-contract")
+        val study = createStudy(owner, "Versioned objective study")
+        val options = com.buddystudy.backend.study.application.model.QuestionChoiceCodec().encode(listOf(
+            com.buddystudy.backend.study.application.model.QuestionChoiceOption("a", "2"),
+            com.buddystudy.backend.study.application.model.QuestionChoiceOption("b", "3"),
+        ))
+        val question = questions.save(QuestionEntity(deviceId = owner.deviceId, userId = study.userId,
+            studyId = study.id, question = "Which number is even?", topic = study.topic,
+            questionFormat = com.buddystudy.study.domain.entity.QuestionFormat.MULTIPLE_CHOICE,
+            choiceOptionsJson = options, correctOptionId = "a", choiceExplanation = "2 is even."))
+        fun versionedGet(path: String, modern: Boolean, authenticated: Boolean = true): HttpResponse<String> {
+            val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET()
+            if (authenticated) addAuthHeaders(builder, owner.accessToken, owner.deviceId, owner.clientSecret)
+            if (modern) builder.header("X-BuddyStudy-API-Version", "3")
+            return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        }
+        val path = "/api/v1/studies/${study.id}?tl=ko"
+        val legacy = versionedGet(path, false)
+        assertThat(legacy.statusCode()).describedAs(legacy.body()).isEqualTo(200)
+        assertThat(legacy.headers().firstValue("X-BuddyStudy-API-Version").orElse("")).isEqualTo("1")
+        assertThat(legacy.json()["pendingQuestion"]["questionFormat"].asText()).isEqualTo("FREE_TEXT")
+        assertThat(legacy.json()["pendingQuestion"]["question"]["question"].asText()).contains("1. 2", "2. 3")
+        val legacyChoices = legacy.json().path("pendingQuestion").path("multipleChoice")
+        assertThat(legacyChoices.isNull || legacyChoices.isMissingNode).isTrue()
+        val modern = versionedGet(path, true)
+        assertThat(modern.json()["pendingQuestion"]["questionFormat"].asText()).isEqualTo("MULTIPLE_CHOICE")
+        assertThat(modern.json()["pendingQuestion"]["multipleChoice"]["options"].size()).isEqualTo(2)
+        assertThat(modern.headers().firstValue("Vary").orElse("")).contains("X-BuddyStudy-API-Version")
+        val answer = postJson("/api/v1/records/${question.id}/answer", """{"answer":"２"}""",
+            owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(answer.statusCode()).describedAs(answer.body()).isEqualTo(202)
+        assertThat(answer.json()["questionFormat"].asText()).isEqualTo("FREE_TEXT")
+        assertThat(questions.findQuestionById(question.id)?.selectedOptionId).isEqualTo("b")
+        assertThat(questions.findQuestionById(question.id)?.questionFormat)
+            .isEqualTo(com.buddystudy.study.domain.entity.QuestionFormat.MULTIPLE_CHOICE)
+        val changed = postJson("/api/v1/records/${question.id}/answer", """{"answer":"1"}""",
+            owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(changed.statusCode()).isEqualTo(409)
+
+        val publicQuiz = questions.save(gradedQuestion(owner.deviceId, study.userId, study.id, study.topic,
+            "Public objective question", Instant.now().minusSeconds(120)).apply {
+            questionFormat = com.buddystudy.study.domain.entity.QuestionFormat.MULTIPLE_CHOICE
+            choiceOptionsJson = options; correctOptionId = "a"; selectedOptionId = "a"
+            choiceExplanation = "2 is even."
+        })
+        assertThat(versionedGet("/api/v1/public/questions/${publicQuiz.id}", false, false).statusCode()).isEqualTo(404)
+        val publicModern = versionedGet("/api/v1/public/questions/${publicQuiz.id}", true, false)
+        assertThat(publicModern.statusCode()).describedAs(publicModern.body()).isEqualTo(200)
+        val hiddenKey = publicModern.json().path("multipleChoice").path("correctOptionId")
+        assertThat(hiddenKey.isNull || hiddenKey.isMissingNode).isTrue()
+        assertThat(versionedGet("/api/v2/public/questions", false, false).json()["totalCount"].asInt()).isZero()
+        assertThat(versionedGet("/api/v2/public/questions", true, false).json()["totalCount"].asInt()).isEqualTo(1)
+    }
+
     @BeforeEach
     fun clearStudyData(): Unit = runBlocking {
         membershipTiers.save(

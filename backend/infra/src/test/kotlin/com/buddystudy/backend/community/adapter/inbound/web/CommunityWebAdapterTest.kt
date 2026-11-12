@@ -12,6 +12,10 @@ import com.buddystudy.backend.community.application.model.CommunityFeedItemRespo
 import com.buddystudy.backend.community.application.model.NativeAdSlotResponse
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import kotlinx.coroutines.runBlocking
+import com.buddystudy.backend.community.application.model.NativeAdvertisementResponse
+import com.buddystudy.backend.community.adapter.inbound.web.dto.PublicQuestionVoteRequest
+import com.buddystudy.backend.study.application.model.MultipleChoiceResponse
+import com.buddystudy.backend.study.application.model.MultipleChoiceOptionResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -32,6 +36,40 @@ class CommunityWebAdapterTest {
         anonymous = false,
     )
     private val authentication = UsernamePasswordAuthenticationToken(principal, null)
+
+    @Test
+    fun `vote endpoint forwards immutable option and locale and declares member permission`(): Unit = runBlocking {
+        val web = mock(CommunityWebPort::class.java)
+        val body = PublicQuestionVoteRequest("b")
+        `when`(web.votePublicQuestion(42, body, "en", "original", authentication)).thenReturn(mapOf(
+            "id" to "42",
+            "multipleChoice" to MultipleChoiceResponse(
+                options = listOf(MultipleChoiceOptionResponse("a", "AOF", 1, 50.0), MultipleChoiceOptionResponse("b", "RDB", 1, 50.0)),
+                selectedOptionId = "b", correctOptionId = "a", totalParticipants = 2,
+                isCorrect = false, explanation = "AOF is append-only.",
+            ),
+        ))
+        val client = WebTestClient.bindToController(CommunityController(web))
+            .webFilter<WebTestClient.ControllerSpec>(WebFilter { exchange, chain ->
+                chain.filter(exchange.mutate().principal(Mono.just(authentication)).build())
+            }).build()
+        client.put().uri("/api/v1/public/questions/42/vote?tl=en&language=ko&view=original")
+            .header("Content-Type", "application/json").bodyValue("""{"selectedOptionId":"b"}""")
+            .exchange().expectStatus().isOk.expectBody().jsonPath("$.id").isEqualTo("42")
+            .jsonPath("$.multipleChoice.selectedOptionId").isEqualTo("b")
+            .jsonPath("$.multipleChoice.isCorrect").isEqualTo(false)
+            .jsonPath("$.multipleChoice.correct").doesNotExist()
+            .jsonPath("$.multipleChoice.totalParticipants").isEqualTo(2)
+            .jsonPath("$.multipleChoice.options[0].count").isEqualTo(1)
+            .jsonPath("$.multipleChoice.options[0].percentage").isEqualTo(50.0)
+        verify(web).votePublicQuestion(42, body, "en", "original", authentication)
+        val method = CommunityController::class.java.methods.single { it.name == "votePublicQuestion" }
+        assertThat(method.getAnnotation(RequirePermission::class.java).value).containsExactly(Permissions.PUBLIC_QUESTION_VOTE)
+        val invalidAuthentication = UsernamePasswordAuthenticationToken("anonymous", null)
+        val adapter = CommunityWebAdapter(mock(CommunityUseCase::class.java))
+        assertThatThrownBy { runBlocking { adapter.votePublicQuestion(42, body, "ko", "localized", invalidAuthentication) } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED)
+    }
 
     @Test
     fun `public feed v2 serializes the native ad slot contract at the server ordered position`(): Unit = runBlocking {

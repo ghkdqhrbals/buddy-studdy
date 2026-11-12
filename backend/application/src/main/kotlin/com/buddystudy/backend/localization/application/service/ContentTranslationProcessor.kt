@@ -1,6 +1,7 @@
 package com.buddystudy.backend.localization.application.service
 
 import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
+import com.buddystudy.backend.localization.application.policy.QuestionChoiceLocalizationPolicy
 import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.common.application.privacy.PrivateLearningContentLogScope
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
@@ -125,13 +126,17 @@ class ContentTranslationProcessor(
             "question" to question.question,
             "hint" to question.hint,
         )
+        fields.putAll(QuestionChoiceLocalizationPolicy.fields(question))
         val sources = fields.keys.associateWith { question.sourceLanguage.databaseValue }
         val result = translator.translate(
             fields.filterValues { !it.isNullOrBlank() },
             sources,
             event.targetLanguage,
         )
-        localizations.saveQuestionReady(question, event.targetLanguage, sourceHash, result, Instant.now())
+        val translated = result.copy(fields = result.fields + (
+            "choiceOptionsJson" to QuestionChoiceLocalizationPolicy.translatedJson(question, result.fields)
+        ))
+        localizations.saveQuestionReady(question, event.targetLanguage, sourceHash, translated, Instant.now())
     }
 
     private suspend fun processAnswer(event: ContentTranslationRequestedEvent) {

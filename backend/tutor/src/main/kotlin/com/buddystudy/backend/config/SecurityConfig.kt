@@ -2,6 +2,8 @@ package com.buddystudy.backend.config
 
 import com.buddystudy.backend.mcpoauth.McpOAuthUseCase
 import org.springframework.beans.factory.annotation.Value
+import com.buddystudy.backend.common.adapter.inbound.web.QUESTION_API_VERSION_HEADER
+import com.buddystudy.backend.common.adapter.inbound.web.negotiatedQuestionApiVersion
 import com.buddystudy.backend.auth.TokenProvider
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.RequirePermission
@@ -200,8 +202,13 @@ class BearerTokenFilter(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_DEVICE_MISMATCH, "Access token device is no longer valid.")
         }
 
+        val device = devices.findByDeviceId(principal.deviceId)
+        val questionVersion = negotiatedQuestionApiVersion(request.headers.getFirst(QUESTION_API_VERSION_HEADER))
+        if (device?.userId == principal.userId && device.questionApiVersion != questionVersion) {
+            devices.updateQuestionApiVersion(device.deviceId, principal.userId, questionVersion)
+        }
         val authenticatedPrincipal = principal.copy(
-            anonymous = devices.findByDeviceId(principal.deviceId)?.userId == null || principal.anonymous,
+            anonymous = device?.userId == null || principal.anonymous,
         )
         return UsernamePasswordAuthenticationToken(
             authenticatedPrincipal,

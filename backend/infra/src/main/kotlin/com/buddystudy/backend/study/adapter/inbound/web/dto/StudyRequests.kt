@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.adapter.inbound.web.dto
+import com.buddystudy.study.domain.entity.QuestionFormatPreference
 
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
@@ -13,6 +14,7 @@ data class CreateStudyRequest(
     var customPrompt: String? = null,
     var openaiModel: String = "gpt-5.4",
     @field:Min(10) @field:Max(10_000) var maxHistoryCount: Int = 100,
+    var questionFormatPreference: QuestionFormatPreference? = null,
 )
 
 data class CreateStudyTopicRequest(
@@ -25,6 +27,7 @@ data class CreateStudyTopicRequest(
 data class AnswerRequest(
     var answer: String = "",
     var sourceLanguage: String? = null,
+    var selectedOptionId: String? = null,
 )
 data class RecordPublicityRequest(var isPublic: Boolean = true)
 data class StudyTopicActivationRequest(var active: Boolean = true)

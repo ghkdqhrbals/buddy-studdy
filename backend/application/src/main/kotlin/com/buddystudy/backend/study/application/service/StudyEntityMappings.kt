@@ -77,6 +77,11 @@ internal fun QuestionEntity.applyGradingMetadata(grade: GradedAnswer) {
 internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
     StudyRecordState(
         id = id,
+        questionFormat = questionFormat.name,
+        choiceOptionsJson = choiceOptionsJson,
+        correctOptionId = correctOptionId,
+        choiceExplanation = choiceExplanation,
+        selectedOptionId = selectedOptionId,
         question = question,
         hint = hint,
         createdAt = createdAt,

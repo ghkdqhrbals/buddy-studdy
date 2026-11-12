@@ -5,6 +5,7 @@ data class ScheduleItemCommand(
     val difficultyLevel: Int = 5,
     val customPrompt: String = "",
     val openaiModel: String = "gpt-5.4",
+    val questionFormatPreference: com.buddystudy.study.domain.entity.QuestionFormatPreference? = null,
 )
 
 data class ScheduleCommand(
@@ -19,4 +20,5 @@ data class ScheduleCommand(
     val openaiModel: String = "gpt-5.4",
     val maxHistoryCount: Int = 100,
     val schedules: List<ScheduleItemCommand>? = null,
+    val questionFormatPreference: com.buddystudy.study.domain.entity.QuestionFormatPreference? = null,
 )

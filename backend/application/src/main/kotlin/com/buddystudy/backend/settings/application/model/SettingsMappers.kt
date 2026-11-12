@@ -15,6 +15,7 @@ fun StudyEntity?.toSettings(user: UserEntity?) = this?.let {
         appLanguage = user?.appLanguage?.databaseValue ?: "ko",
         openaiModel = it.openaiModel,
         maxHistoryCount = it.maxHistoryCount,
+        questionFormatPreference = it.questionFormatPreference,
         openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
         nextDueAt = it.nextDueAt,
         lastError = it.lastError,

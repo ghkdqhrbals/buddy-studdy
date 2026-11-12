@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
+import com.buddystudy.study.domain.entity.QuestionFormat
 
 import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
 import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
@@ -30,11 +31,11 @@ class QuestionGenerationSagaRepository(
             insert into question_generation_sagas (
                 correlation_id, user_id, study_id, topic_id, question_id, source, status, current_step,
                 idempotency_key, quota_period_started_at, quota_refunded_at, failed_step, error_code,
-                error_message, created_at, updated_at, completed_at, rollback_completed_at, parent_record_id, root_record_id, follow_up_depth
+                error_message, created_at, updated_at, completed_at, rollback_completed_at, parent_record_id, root_record_id, follow_up_depth, question_format
             ) values (
                 :correlationId, :userId, :studyId, :topicId, :questionId, :source, :status, :currentStep,
                 :idempotencyKey, :quotaPeriodStartedAt, :quotaRefundedAt, :failedStep, :errorCode,
-                :errorMessage, :createdAt, :updatedAt, :completedAt, :rollbackCompletedAt, :parentRecordId, :rootRecordId, :followUpDepth
+                :errorMessage, :createdAt, :updatedAt, :completedAt, :rollbackCompletedAt, :parentRecordId, :rootRecordId, :followUpDepth, :questionFormat
             )
             """.trimIndent(),
         )
@@ -44,6 +45,7 @@ class QuestionGenerationSagaRepository(
             .bind("topicId", saga.topicId)
             .bind("source", saga.source.name)
             .bind("followUpDepth", saga.followUpDepth)
+            .bind("questionFormat", saga.questionFormat.name)
             .bind("status", saga.status.name)
             .bind("currentStep", saga.currentStep.name)
             .bind("idempotencyKey", saga.idempotencyKey)
@@ -275,6 +277,7 @@ class QuestionGenerationSagaRepository(
             parentRecordId = get("parent_record_id", java.lang.Long::class.java)?.toLong(),
             rootRecordId = get("root_record_id", java.lang.Long::class.java)?.toLong(),
             followUpDepth = (get("follow_up_depth") as Number).toInt(),
+            questionFormat = QuestionFormat.valueOf(get("question_format", String::class.java)!!),
             source = QuestionGenerationSource.valueOf(get("source", String::class.java)!!),
             status = QuestionGenerationStatus.valueOf(get("status", String::class.java)!!),
             currentStep = QuestionGenerationStep.valueOf(get("current_step", String::class.java)!!),
