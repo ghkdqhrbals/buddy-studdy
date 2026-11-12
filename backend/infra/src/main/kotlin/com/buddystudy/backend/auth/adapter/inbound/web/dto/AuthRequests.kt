@@ -11,6 +11,7 @@ data class DeviceRegisterRequest(
     var timezone: String = "Asia/Seoul",
     var appVersion: String? = null,
     var appBuild: String? = null,
+    var questionApiVersion: Int = 1,
 )
 
 data class PushTokenRequest(var apnsToken: String = "", var apnsEnvironment: String = "production")

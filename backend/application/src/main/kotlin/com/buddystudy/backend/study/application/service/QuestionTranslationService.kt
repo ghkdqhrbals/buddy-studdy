@@ -2,9 +2,12 @@ package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.localization.application.policy.QuestionChoiceLocalizationPolicy
 import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
+import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import com.buddystudy.backend.study.application.port.inbound.ProcessQuestionTranslationUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionTranslationExecutionWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
@@ -48,6 +51,7 @@ class QuestionTranslationService(
                 hint = question.hint,
                 sourceLanguage = event.sourceLanguage,
                 targetLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
+                choiceOptionsJson = question.choiceOptionsJson,
             )
             writer.complete(
                 event = event,
@@ -109,6 +113,7 @@ class QuestionTranslationService(
         hint: String?,
         sourceLanguage: String,
         targetLanguage: String,
+        choiceOptionsJson: String? = null,
     ): TranslatedQuestionContent? {
         val normalizedSource = QuestionLanguage.normalize(sourceLanguage)
         val normalizedTarget = QuestionLanguage.normalize(targetLanguage)
@@ -139,7 +144,22 @@ class QuestionTranslationService(
         ) {
             "Question translation did not produce the requested content language."
         }
-        return translated
+        val choices = QuestionChoiceCodec().decode(choiceOptionsJson)
+        if (choices.isEmpty()) return translated
+        val translatedChoices = choices.map { option ->
+            val label = translations.translate(
+                topic = "CONTENT",
+                question = option.text,
+                hint = null,
+                sourceLanguage = normalizedSource,
+                targetLanguage = normalizedTarget,
+                validationMode = TranslationValidationMode.SHORT_TEXT,
+            ).question
+            check(label.isNotBlank()) { "Question translation returned an empty choice." }
+            option.copy(text = label)
+        }
+        QuestionChoiceLocalizationPolicy.validateTranslatedOptions(translatedChoices)
+        return translated.copy(choiceOptionsJson = QuestionChoiceCodec().encode(translatedChoices))
     }
 
     private companion object {

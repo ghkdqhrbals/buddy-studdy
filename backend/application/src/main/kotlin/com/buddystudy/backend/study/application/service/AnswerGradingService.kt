@@ -1,4 +1,6 @@
 package com.buddystudy.backend.study.application.service
+import com.buddystudy.study.domain.entity.QuestionFormat
+import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
@@ -64,7 +66,20 @@ class AnswerGradingService(
 
         val grade = try {
             withTimeout(timeoutSeconds * 1_000) {
-                openAI.gradeWithRubric(
+                if (question.questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+                    val selected = checkNotNull(question.selectedOptionId) { "Missing selected option." }
+                    val correct = selected == checkNotNull(question.correctOptionId) { "Missing correct option." }
+                    val feedback = when (question.sourceLanguage.databaseValue) {
+                        "ko" -> if (correct) "정답입니다." else "오답입니다. 해설을 확인해 보세요."
+                        "ja" -> if (correct) "正解です。" else "不正解です。解説を確認してください。"
+                        else -> if (correct) "Correct." else "Incorrect. Review the explanation."
+                    }
+                    GradedAnswer(
+                        score = if (correct) 100 else 0, isCorrect = correct,
+                        feedback = feedback, explanation = question.choiceExplanation.orEmpty(),
+                        policyVersion = "multiple-choice-v1", model = null,
+                    )
+                } else openAI.gradeWithRubric(
                     apiKey = userContentKeys.requireApiKey(),
                     model = study?.openaiModel?.takeIf { it.isNotBlank() } ?: properties.openai.model,
                     question = question.question,

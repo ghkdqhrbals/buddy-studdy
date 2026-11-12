@@ -97,12 +97,14 @@ private fun ScheduleRequest.toCommand() = ScheduleCommand(
     appLanguage = appLanguage,
     openaiModel = openaiModel,
     maxHistoryCount = maxHistoryCount,
+    questionFormatPreference = questionFormatPreference,
     schedules = schedules?.map {
         ScheduleItemCommand(
             topic = it.topic,
             difficultyLevel = it.difficultyLevel,
             customPrompt = QuestionPromptDefaults.resolve(it.customPrompt),
             openaiModel = it.openaiModel,
+            questionFormatPreference = it.questionFormatPreference,
         )
     },
 )

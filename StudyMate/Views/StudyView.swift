@@ -15,6 +15,7 @@ struct StudyView: View {
     @State private var showsCustomQuestionComposer = false
     @State private var savedCustomQuestion: StudyRecord?
     @State private var selectedTreeRootID: Int?
+    @State private var choiceSubmissionError: String?
     @State private var answerSubmissionTask: Task<Void, Never>?
     @State private var answerGradingOwnerID: String?
     @State private var isResolvingInitialAnswerState: Bool
@@ -96,7 +97,10 @@ struct StudyView: View {
                             onSubmit: submitCurrentAnswer,
                             onSkip: {
                                 appState.skipStudyRoomRecord(record)
-                            }
+                            },
+                            choiceIntent: appState.studyChoiceIntent(for: record),
+                            choiceError: choiceSubmissionError,
+                            onChoose: { submitChoice(record, optionID: $0) }
                             )
                             StudyFollowUpActions(record: record)
                         }
@@ -157,15 +161,17 @@ struct StudyView: View {
                 initialTitle: room.topic,
                 initialDifficulty: Difficulty(level: room.difficultyLevel),
                 initialQuestionRotationEnabled: room.activeForQuestions,
+                initialQuestionFormatPreference: room.parentStudyId == nil ? room.questionFormatPreference : nil,
                 strings: strings,
                 onDelete: {
                     deleteStudyRoom(room)
                 }
-            ) { title, difficulty, questionRotationEnabled in
+            ) { title, difficulty, questionRotationEnabled, formatPreference in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
                     title: title,
-                    difficulty: difficulty
+                    difficulty: difficulty,
+                    questionFormatPreference: formatPreference
                 )
                 if let questionRotationEnabled,
                    questionRotationEnabled != room.activeForQuestions {
@@ -250,6 +256,7 @@ struct StudyView: View {
         }
         .onChange(of: draftAnswer) {
             if let selectedStudyRecord,
+               selectedStudyRecord.question.questionFormat == .freeText,
                StudyAnswerPresentationPolicy.shouldShowEditor(for: selectedStudyRecord),
                draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
                 appState.updateAnswer(draftAnswer, for: selectedStudyRecord)
@@ -257,6 +264,7 @@ struct StudyView: View {
         }
         .onChange(of: selectedStudyRecord?.id) {
             showsHint = false
+            choiceSubmissionError = nil
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
         }
         .task(id: selectedStudyRecord?.id) {
@@ -584,6 +592,20 @@ struct StudyView: View {
         #endif
     }
 
+    private func submitChoice(_ record: StudyRecord, optionID: String) {
+        guard answerSubmissionTask == nil, !isResolvingInitialAnswerState,
+              !appState.isAnswerGradingInProgress(for: record) else { return }
+        choiceSubmissionError = nil
+        let ownerID = UUID().uuidString
+        answerGradingOwnerID = ownerID
+        answerSubmissionTask = Task {
+            await appState.submitStudyChoice(record, optionID: optionID, pollingOwnerID: ownerID)
+            choiceSubmissionError = appState.errorMessage
+            answerSubmissionTask = nil
+            if answerGradingOwnerID == ownerID { answerGradingOwnerID = nil }
+        }
+    }
+
     private func submitCurrentAnswer() {
         guard let selectedStudyRecord,
               canSubmitAnswer,
@@ -712,6 +734,9 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     @ViewBuilder var answerEditor: () -> AnswerEditorContent
     var onSubmit: () -> Void
     var onSkip: () -> Void
+    var choiceIntent: String? = nil
+    var choiceError: String? = nil
+    var onChoose: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -746,6 +771,11 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                     }
 
                     hintView
+                    if question.questionFormat == .multipleChoice, let choice = question.multipleChoice {
+                        MultipleChoiceOptionsView(choice: choice, strings: strings,
+                            isPending: isGradingAnswer || isResolvingAnswerState || !allowsAnswerEditing || onChoose == nil,
+                            intent: choiceIntent, errorMessage: choiceError) { onChoose?($0) }
+                    }
                 }
             }
 
@@ -762,7 +792,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         .padding(.horizontal, 13)
                         .background(Color.green.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
-            } else if allowsAnswerEditing && !isResolvingAnswerState &&
+            } else if allowsAnswerEditing && question.questionFormat == .freeText && !isResolvingAnswerState &&
                         gradingResult == nil &&
                         !isGradingAnswer {
                 StudyChatBubble(role: .learnerInput) {

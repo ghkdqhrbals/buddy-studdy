@@ -348,14 +348,15 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "submit_answer",
                 title = "Submit an answer for grading",
-                description = "Save the learner's exact answer to the BuddyStudy question currently presented in the conversation and queue grading. An ordinary answer in an active exercise is enough; users need not say submit, grade or give an ID. Resolve and verify the question from conversation context with list_pending_questions/get_record; if ambiguous ask by topic/question text, never by ID. Do not submit drafts, hint requests, quoted history or hypothetical answers. Preserve the actual answer language via source_language. Poll get_grading_process then get_record and report saved feedback, not your own score.",
+                description = "Save the learner's exact answer to the BuddyStudy question currently presented in the conversation and queue grading. An ordinary answer in an active exercise is enough; users need not say submit, grade or give an ID. Resolve and verify the question from conversation context with list_pending_questions/get_record; if ambiguous ask by topic/question text, never by ID. Do not submit drafts, hint requests, quoted history or hypothetical answers. Preserve the actual answer language via source_language. For MULTIPLE_CHOICE, omit answer and send only the learner-selected selected_option_id from the returned options; never invent the choice. Selections are final. Poll get_grading_process then get_record and report saved feedback, not your own score.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "record_id" to idProperty("Pending question record ID."),
                         "answer" to stringProperty("The user's answer. Do not invent or rewrite it.", minLength = 1, maxLength = 50_000),
                         "source_language" to languageProperty("Optional language of the answer."),
+                        "selected_option_id" to stringProperty("Selected option ID for MULTIPLE_CHOICE; omit answer.", minLength = 1, maxLength = 64),
                     ),
-                    required = listOf("record_id", "answer"),
+                    required = listOf("record_id"),
                 ),
                 readOnly = false,
                 destructive = true,
@@ -365,8 +366,9 @@ class BuddyStudyMcpAdapter(
                 buddyStudy.submitAnswer(
                     principal,
                     args.long("record_id"),
-                    args.string("answer"),
+                    args.optionalString("answer") ?: "",
                     args.optionalString("source_language"),
+                    args.optionalString("selected_option_id"),
                 )
             },
             tool(

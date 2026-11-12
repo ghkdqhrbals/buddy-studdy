@@ -67,6 +67,7 @@ class DeviceRegistrationManager(
         device.timezone = command.timezone
         device.appVersion = command.appVersion?.takeIf { it.isNotBlank() }
         device.appBuild = command.appBuild?.takeIf { it.isNotBlank() }
+        device.questionApiVersion = if (command.questionApiVersion == 3) 3 else 1
         device.appVersionSeenAt = now
         device.updatedAt = now
         device.lastSeenAt = now

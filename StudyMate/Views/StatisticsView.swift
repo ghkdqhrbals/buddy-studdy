@@ -482,6 +482,7 @@ struct StudyRecordDetailView: View {
     @State private var isShowingOriginal = false
     @State private var originalAvailable: Bool
     @State private var showsHint = false
+    @State private var choiceSubmissionError: String?
     @State private var answerSubmissionTask: Task<Void, Never>?
     @State private var answerGradingOwnerID: String?
     #if os(iOS)
@@ -546,6 +547,14 @@ struct StudyRecordDetailView: View {
                             }
 
                             hintView(for: displayedRecord)
+                            if displayedRecord.question.questionFormat == .multipleChoice, let choice = displayedRecord.question.multipleChoice {
+                                MultipleChoiceOptionsView(choice: choice, strings: appState.strings,
+                                    isPending: isGradingAnswer || answerSubmissionTask != nil,
+                                    intent: appState.studyChoiceIntent(for: displayedRecord),
+                                    errorMessage: choiceSubmissionError) { optionID in
+                                    submitChoice(for: displayedRecord, optionID: optionID)
+                                }
+                            }
                         }
                     }
 
@@ -558,7 +567,7 @@ struct StudyRecordDetailView: View {
                                 .tint(.white)
                                 .textSelection(.enabled)
                         }
-                    } else if displayedRecord.isPendingQuestion {
+                    } else if displayedRecord.isPendingQuestion && displayedRecord.question.questionFormat == .freeText {
                         RecordChatBubble(role: .input) {
                             RecordAnswerInput(
                                 strings: appState.strings,
@@ -658,7 +667,7 @@ struct StudyRecordDetailView: View {
             showsHint = false
         }
         .onChange(of: draftAnswer) {
-            if StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) {
+            if latestRecord.question.questionFormat == .freeText && StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) {
                 appState.updateAnswer(draftAnswer, for: latestRecord)
             }
         }
@@ -671,6 +680,20 @@ struct StudyRecordDetailView: View {
                 )
                 self.answerGradingOwnerID = nil
             }
+        }
+    }
+
+    private func submitChoice(for record: StudyRecord, optionID: String) {
+        guard answerSubmissionTask == nil, !appState.isAnswerGradingInProgress(for: record) else { return }
+        choiceSubmissionError = nil
+        let ownerID = UUID().uuidString
+        answerGradingOwnerID = ownerID
+        answerSubmissionTask = Task {
+            await appState.submitStudyChoice(record, optionID: optionID, pollingOwnerID: ownerID)
+            if let updated = appState.studyRecords.first(where: { $0.id == record.id }) { detailRecord = updated }
+            choiceSubmissionError = appState.errorMessage
+            answerSubmissionTask = nil
+            if answerGradingOwnerID == ownerID { answerGradingOwnerID = nil }
         }
     }
 

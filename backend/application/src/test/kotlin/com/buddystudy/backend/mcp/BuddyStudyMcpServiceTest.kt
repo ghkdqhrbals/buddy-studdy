@@ -338,6 +338,25 @@ class BuddyStudyMcpServiceTest {
     }
 
     @Test
+    fun `multiple choice submission forwards the exact choice without fabricating answer text`(): Unit = runBlocking {
+        val expected = Mockito.mock(StudyRecordResponse::class.java)
+        Mockito.`when`(answers.answerChoice(principal, 91, "b")).thenReturn(expected)
+        val actual = service.submitAnswer(principal, 91, "", "ko", selectedOptionId = "b")
+        assertThat(actual).isSameAs(expected)
+        Mockito.verify(answers).answerChoice(principal, 91, "b")
+        Mockito.verifyNoMoreInteractions(answers)
+    }
+
+    @Test
+    fun `mixed text and choice payload is rejected before saving`(): Unit = runBlocking {
+        val failure = runCatching {
+            service.submitAnswer(principal, 91, "my answer", null, selectedOptionId = "b")
+        }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(ApiException::class.java)
+        Mockito.verifyNoInteractions(answers)
+    }
+
+    @Test
     fun `delete requires explicit confirmation before touching study state`(): Unit = runBlocking {
         val failure = runCatching {
             service.deleteStudy(principal, studyId = 42, confirmed = false)

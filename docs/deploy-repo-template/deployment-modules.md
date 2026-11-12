@@ -39,6 +39,16 @@ deployment.
 
 ## Rules
 
+- The backend workflow reads the boolean repository variable
+  `BUDDYSTUDY_MULTIPLE_CHOICE_ENABLED` (default `false`), validates it, and writes
+  it into the backend runtime `.env`. Enabling it affects only generation admitted
+  through the multiple-choice-aware API contract or capable scheduled delivery;
+  API requests without `X-BuddyStudy-API-Version: 3` retain the legacy contract.
+  Do not force-update older iOS builds for this rollout. Build/deploy the backend
+  with the flag off, distribute the capable iOS release, and then enable the flag
+  through another backend-only deployment. Existing questions and recorded choices
+  survive disabling the generation flag.
+
 - A workflow must deploy one module. If two modules need to change, run two
   workflows.
 - LibreTranslate is an internal-only runtime on `buddystudy-net`. Its workflow

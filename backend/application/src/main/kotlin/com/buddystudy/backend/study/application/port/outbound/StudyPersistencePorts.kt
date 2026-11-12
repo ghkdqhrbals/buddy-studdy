@@ -246,6 +246,7 @@ interface QuestionPort {
         offset: Int,
     ): Page<QuestionEntity> = error("The question persistence adapter must implement liked public-question paging.")
     suspend fun findPublicAnsweredById(id: Long): QuestionEntity?
+    suspend fun lockPublicAnsweredById(id: Long): QuestionEntity? = findPublicAnsweredById(id)
     suspend fun findPublicAnsweredByIdAndLanguage(id: Long, language: String): QuestionEntity? =
         findPublicAnsweredById(id)
     suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>

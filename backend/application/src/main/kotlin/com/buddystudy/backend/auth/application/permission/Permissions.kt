@@ -28,6 +28,7 @@ object Permissions {
     const val STATS_READ = "stats:read"
     const val PUBLIC_QUESTION_READ = "public-question:read"
     const val PUBLIC_QUESTION_LIKE = "public-question:like"
+    const val PUBLIC_QUESTION_VOTE = "public-question:vote"
     const val PUBLIC_QUESTION_COMMENT = "public-question:comment"
     const val PUBLIC_QUESTION_REPORT = "public-question:report"
     const val PUBLIC_USER_BLOCK = "public-user:block"

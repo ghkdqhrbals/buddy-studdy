@@ -42,6 +42,8 @@ protocol RecordsRepository {
         sourceLanguage: String
     ) async throws -> StudyRecord
 
+    func submitChoice(registration: RemotePushRegistration, recordID: String, selectedOptionId: String, sourceLanguage: String) async throws -> StudyRecord
+
     func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
         correlationID: String,

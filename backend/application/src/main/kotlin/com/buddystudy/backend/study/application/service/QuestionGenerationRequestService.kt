@@ -1,7 +1,15 @@
 package com.buddystudy.backend.study.application.service
+import com.buddystudy.study.domain.entity.QuestionFormatPreference
+import com.buddystudy.study.domain.entity.QuestionFormat
+import com.buddystudy.backend.config.BuddyStudyProperties
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort
+import com.buddystudy.backend.common.application.port.outbound.LegacyClientQuestionContract
+import com.buddystudy.backend.study.application.model.forQuestionContract
+import com.buddystudy.backend.study.application.port.outbound.QuestionDeliveryCapabilityPort
+import com.buddystudy.backend.study.application.port.outbound.LegacyQuestionDeliveryCapability
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
@@ -79,6 +87,9 @@ class QuestionGenerationRequestWriteService(
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val sagas: QuestionGenerationSagaPort,
     private val outbox: RedisEventOutboxAppendPort,
+    private val properties: BuddyStudyProperties = BuddyStudyProperties(),
+    private val clientContract: ClientQuestionContractPort = LegacyClientQuestionContract,
+    private val deliveryCapability: QuestionDeliveryCapabilityPort = LegacyQuestionDeliveryCapability,
 ) : QuestionGenerationRequestWriteUseCase {
     @Transactional
     override suspend fun enqueueManual(
@@ -205,8 +216,14 @@ class QuestionGenerationRequestWriteService(
         val reservation = checkNotNull(questionKey.quotaReservation) {
             "Question quota reservation is required."
         }
+        val supportsMultipleChoice = when (source) {
+            QuestionGenerationSource.MANUAL -> clientContract.currentVersion() >= 3
+            QuestionGenerationSource.SCHEDULED -> deliveryCapability.supportsMultipleChoice(user.id)
+            QuestionGenerationSource.FOLLOW_UP -> false
+        }
         val saga = QuestionGenerationSaga(
             correlationId = correlationId,
+            questionFormat = resolveQuestionFormat(rootStudy.questionFormatPreference, source, supportsMultipleChoice),
             userId = user.id,
             studyId = rootStudy.id,
             topicId = topicStudy.id,
@@ -244,6 +261,23 @@ class QuestionGenerationRequestWriteService(
         )
         val outboxId = outbox.appendQuestionGenerationRequested(event, now)
         return saga.toQueued(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId))
+    }
+
+    internal fun resolveQuestionFormat(
+        preference: QuestionFormatPreference,
+        source: QuestionGenerationSource,
+        supportsMultipleChoice: Boolean,
+    ): QuestionFormat {
+        if (!supportsMultipleChoice || !properties.multipleChoice.enabled || source == QuestionGenerationSource.FOLLOW_UP) {
+            return QuestionFormat.FREE_TEXT
+        }
+        return when (preference) {
+            QuestionFormatPreference.FREE_TEXT -> QuestionFormat.FREE_TEXT
+            QuestionFormatPreference.MULTIPLE_CHOICE -> QuestionFormat.MULTIPLE_CHOICE
+            QuestionFormatPreference.MIXED ->
+                if (kotlin.random.Random.nextBoolean()) QuestionFormat.FREE_TEXT
+                else QuestionFormat.MULTIPLE_CHOICE
+        }
     }
 
     private suspend fun existing(userId: Long, idempotencyKey: String): QueuedQuestionGeneration? =
@@ -304,6 +338,7 @@ class QuestionGenerationProcessService(
     private val questionStats: QuestionStatsPort,
     private val users: UserPort,
     private val contentLocalizations: ContentLocalizationPort,
+    private val clientContract: ClientQuestionContractPort = LegacyClientQuestionContract,
 ) : GetQuestionGenerationProcessUseCase {
     @Transactional(readOnly = true)
     override suspend fun get(principal: Principal, correlationId: String): QuestionGenerationProcessResponse {
@@ -316,13 +351,14 @@ class QuestionGenerationProcessService(
         val question = saga.questionId
             ?.let { questions.findByIdAndUserIdAndDeletedAtIsNull(it, principal.userId) }
             ?.let { entity ->
-                entity.applyReadyQuestionLocalization(
-                    contentLocalizations.record(entity.id, language),
-                    language,
-                )
-                    .toStudyRecord(questionStats.findById(entity.id))
-                    .toProjection()
-                    .toRecordResponse()
+                val sourceLanguage = entity.sourceLanguage.databaseValue
+                val sourceHash = com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy.recordHashes(entity).question
+                val localization = contentLocalizations.record(entity.id, language)
+                val ready = localization.question?.let { it.status == "READY" && it.sourceHash == sourceHash } == true
+                entity.applyReadyQuestionLocalization(localization, language)
+                    .toStudyRecord(questionStats.findById(entity.id)).toProjection()
+                    .toRecordResponse(requestedLanguage = language, questionDisplayLanguage = if (ready) language else sourceLanguage)
+                    .forQuestionContract(clientContract.currentVersion())
             }
         val terminal = saga.status == QuestionGenerationStatus.COMPLETED ||
             (saga.status == QuestionGenerationStatus.FAILED && saga.rollbackCompletedAt != null)

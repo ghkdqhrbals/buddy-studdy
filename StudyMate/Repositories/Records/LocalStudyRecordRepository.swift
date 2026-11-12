@@ -21,6 +21,9 @@ protocol LocalStudyRecordRepository {
 
     func loadAnswerDraft(recordID: String) -> String
     func saveAnswerDraft(_ answer: String, recordID: String)
+    func loadChoiceDraft(recordID: String) -> String?
+    func saveChoiceDraft(_ optionID: String, recordID: String)
+
     func deleteAnswerDraft(recordID: String)
 
     func loadQuestionHistory() -> [QuestionItem]

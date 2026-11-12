@@ -42,7 +42,9 @@ class StudyRecordTypeMutationGuardTest {
     private val outbox = mock(RedisEventOutboxAppendPort::class.java)
     private val languages = mock(ContentLanguageDetectionPort::class.java)
     private val translations = mock(ContentTranslationRequestAppendPort::class.java)
-    private val writer = StudyRecordWriteService(questions, coverage, progress, outbox, languages, translations)
+    private val writer = StudyRecordWriteService(questions, coverage, progress, outbox, languages, translations,
+        org.mockito.Mockito.mock(com.buddystudy.backend.study.application.port.outbound.QuestionChoiceResponsePort::class.java),
+        com.buddystudy.backend.study.application.model.QuestionChoiceCodec())
 
     @Test
     fun `skipping an unsubmitted question saves once and repeating preserves its timestamps`(): Unit = runBlocking {

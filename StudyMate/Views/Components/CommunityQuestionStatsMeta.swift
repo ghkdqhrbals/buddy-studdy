@@ -92,7 +92,8 @@ struct CommunityQuestionStatsMeta: View {
     }
 
     private var resultPresentation: CommunityQuestionResultPresentation? {
-        guard let score = question.displayScore else {
+        guard question.questionFormat != .multipleChoice || question.multipleChoice?.hasAnswered == true,
+              let score = question.displayScore else {
             return nil
         }
 
@@ -232,5 +233,115 @@ struct CommunityQuestionActionPolicy: Equatable {
         // Authenticated server ownership is available before /profile finishes.
         // A missing legacy identity is unknown, never evidence of another author.
         self.init(isSignedIn: isSignedIn, isOwner: isOwnedByMe ?? legacyOwnership)
+    }
+}
+
+/// Shared by owned study questions and public feed cards; results appear only after an accepted answer.
+struct MultipleChoiceOptionsView: View {
+    var choice: MultipleChoiceQuestion
+    var strings: AppStrings
+    var isPending = false
+    var intent: String? = nil
+    var errorMessage: String? = nil
+    var onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if choice.hasValidOptions {
+                ForEach(choice.options) { option in
+                    Group {
+                        if choice.hasAnswered {
+                            optionLabel(option)
+                                .accessibilityElement(children: .ignore)
+                        } else {
+                            Button { onSelect(option.id) } label: { optionLabel(option) }
+                                .buttonStyle(.plain)
+                                .disabled(isPending || (intent != nil && intent != option.id))
+                        }
+                    }
+                    .accessibilityLabel(accessibilityLabel(for: option))
+                }
+                if choice.hasAnswered {
+                    if let total = choice.totalParticipants {
+                        Text(strings.quizParticipants(total))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let correctID = choice.correctOptionId,
+                       let correct = choice.options.first(where: { $0.id == correctID }) {
+                        Text("\(strings.correctAnswer): \(correct.text)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+                    if let explanation = choice.explanation, !explanation.isEmpty {
+                        MarkdownMessageText(markdown: explanation)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(errorMessage ?? (intent != nil && !isPending ? strings.choiceSubmissionFailed : strings.chooseAnswer))
+                        .font(.caption)
+                        .foregroundStyle(errorMessage == nil ? Color.secondary : Color.red)
+                }
+            } else {
+                Text(strings.choiceUnavailable).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func optionLabel(_ option: MultipleChoiceOption) -> some View {
+        HStack(alignment: .center, spacing: 9) {
+            Image(systemName: icon(for: option))
+                .foregroundStyle(choice.hasAnswered && choice.correctOptionId == option.id ? Color.green : Color.secondary)
+            Text(option.text)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if choice.hasAnswered, let percentage = option.percentage, let count = option.count {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(Int(percentage.rounded()))%")
+                        .font(.subheadline.weight(.semibold))
+                    Text(strings.quizOptionCount(count))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .monospacedDigit()
+            } else if isPending && intent == option.id {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .background {
+            if choice.hasAnswered, let percentage = option.percentage {
+                GeometryReader { geometry in
+                    Color.accentColor.opacity(0.16)
+                        .frame(width: geometry.size.width * min(max(percentage, 0), 100) / 100)
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(choice.selectedOptionId == option.id ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: choice.selectedOptionId == option.id ? 1.5 : 1))
+        .contentShape(Rectangle())
+    }
+
+    private func icon(for option: MultipleChoiceOption) -> String {
+        if choice.hasAnswered && choice.correctOptionId == option.id { return "checkmark.circle.fill" }
+        if (choice.selectedOptionId ?? intent) == option.id { return "largecircle.fill.circle" }
+        return "circle"
+    }
+
+    private func accessibilityLabel(for option: MultipleChoiceOption) -> String {
+        var label = option.text
+        if choice.selectedOptionId == option.id { label += ", " + strings.selectedAnswer }
+        if choice.hasAnswered && choice.correctOptionId == option.id { label += ", " + strings.correctAnswer }
+        if choice.hasAnswered, let count = option.count, let percentage = option.percentage {
+            label += ", \(Int(percentage.rounded()))%, " + strings.quizOptionCount(count)
+        }
+        return label
     }
 }

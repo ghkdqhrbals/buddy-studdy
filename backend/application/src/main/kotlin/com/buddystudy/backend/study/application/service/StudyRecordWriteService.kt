@@ -1,4 +1,7 @@
 package com.buddystudy.backend.study.application.service
+import com.buddystudy.study.domain.entity.QuestionFormat
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
+import com.buddystudy.backend.study.application.port.outbound.QuestionChoiceResponsePort
 
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -38,6 +41,9 @@ class StudyRecordWriteService(
     private val redisOutbox: RedisEventOutboxAppendPort,
     private val languageDetector: ContentLanguageDetectionPort,
     private val translationRequests: ContentTranslationRequestAppendPort,
+    private val choiceResponses: QuestionChoiceResponsePort,
+    private val choiceCodec: QuestionChoiceCodec,
+
 ) : StudyRecordWriteUseCase, AnswerGradingWriteUseCase {
     @Transactional
     override suspend fun answer(
@@ -49,6 +55,9 @@ class StudyRecordWriteService(
         now: Instant,
     ): QuestionWriteResult {
         val question = lockGeneratedQuestion(recordId, userId)
+        if (question.questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Select an option to answer this question.")
+        }
         if (question.source == QuestionSource.CUSTOM_QUESTION ||
             question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
             question.gradingRequestId != null ||
@@ -130,11 +139,13 @@ class StudyRecordWriteService(
         lockRecord(recordId, userId)
         val deleted = questions.softDelete(recordId, userId, now)
         check(deleted == 1) { "Expected one record to be deleted, but updated $deleted." }
+        choiceResponses.deleteByQuestionId(recordId)
     }
 
     @Transactional
     override suspend fun clear(userId: Long, now: Instant) {
         questions.softDeleteByUserId(userId, now)
+        choiceResponses.deleteByOwnerUserId(userId)
     }
 
     @Transactional
@@ -155,9 +166,34 @@ class StudyRecordWriteService(
         sourceLanguage: String,
         aiResponseLanguage: String,
         now: Instant,
+    ): QueuedAnswerGrading = enqueueAnswer(userId, recordId, answer, sourceLanguage, aiResponseLanguage, now, null)
+
+    @Transactional
+    override suspend fun queueChoice(
+        userId: Long, recordId: Long, selectedOptionId: String, aiResponseLanguage: String, now: Instant,
+    ): QueuedAnswerGrading = enqueueAnswer(userId, recordId, "", aiResponseLanguage, aiResponseLanguage, now, selectedOptionId)
+
+    private suspend fun enqueueAnswer(
+        userId: Long, recordId: Long, answer: String, sourceLanguage: String, aiResponseLanguage: String,
+        now: Instant, selectedOptionId: String?,
     ): QueuedAnswerGrading {
         val question = lockGeneratedQuestion(recordId, userId)
-        val normalizedAnswer = answer.trim()
+        val choice = if (question.questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+            val option = choiceCodec.decode(question.choiceOptionsJson).firstOrNull { it.id == selectedOptionId }
+                ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Select a valid option.")
+            if (question.selectedOptionId != null) {
+                if (question.selectedOptionId == option.id) return QueuedAnswerGrading(question, emptyList())
+                throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.ANSWER_ALREADY_SUBMITTED, "The selected option cannot be changed.")
+            }
+            if (question.status != QuestionStatus.UNGRADED) {
+                throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.ANSWER_ALREADY_SUBMITTED, "This question cannot be answered.")
+            }
+            option
+        } else {
+            if (selectedOptionId != null) throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "This question requires a written answer.")
+            null
+        }
+        val normalizedAnswer = choice?.text ?: answer.trim()
         val persistedAnswer = question.answer?.trim()?.takeIf { it.isNotEmpty() }
         if (question.source == QuestionSource.CUSTOM_QUESTION ||
             question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
@@ -187,8 +223,13 @@ class StudyRecordWriteService(
             requestedAt = now,
             responseLanguage = aiResponseLanguage,
         )
+        if (choice != null) {
+            val persistedChoice = choiceResponses.insertOrRead(recordId, userId, choice.id, now)
+            if (persistedChoice != choice.id) throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.ANSWER_ALREADY_SUBMITTED, "The selected option cannot be changed.")
+            question.selectedOptionId = choice.id
+        }
         if (persistedAnswer == null) {
-            question.apply(question.toStudyRecord().answer(normalizedAnswer, sourceLanguage, now))
+            question.apply(question.toStudyRecord().answer(normalizedAnswer, if (choice != null) question.sourceLanguage.databaseValue else sourceLanguage, now))
         }
         question.gradingRequestId = requestId
         question.gradingStatus = AnswerGradingStatus.QUEUED

@@ -18,5 +18,6 @@ fun QuestionEntity.applyReadyQuestionLocalization(
     topic = localized.fields["topic"] ?: topic
     question = localized.fields["question"] ?: question
     hint = localized.fields["hint"] ?: hint
+    choiceOptionsJson = localized.fields["choiceOptionsJson"] ?: choiceOptionsJson
     return this
 }

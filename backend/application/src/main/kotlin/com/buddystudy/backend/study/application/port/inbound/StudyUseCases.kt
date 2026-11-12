@@ -15,6 +15,8 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationRequeste
 import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 
 interface StudyUseCase {
+    suspend fun answerChoice(principal: Principal, recordId: Long, selectedOptionId: String): StudyRecordResponse =
+        error("Multiple choice answers are not implemented.")
     suspend fun answer(
         principal: Principal,
         recordId: Long,

@@ -62,13 +62,57 @@ class QuestionGenerationRequestWriteServiceTest {
         assertThat(fixture.insertedSagas).hasSize(1)
     }
 
-    private fun fixture(latestStatus: QuestionStatus?): Fixture = runBlocking {
+    @Test
+    fun `resolved question format remains frozen when idempotent request is replayed`() = runBlocking<Unit> {
+        val fixture = fixture(null, com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
+        val first = fixture.writer.enqueueManual(7, "device-7", 11, "same-request", fixture.now)
+        fixture.study.questionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.FREE_TEXT
+        val replay = fixture.writer.enqueueManual(7, "device-7", 11, "same-request", fixture.now.plusSeconds(1))
+        assertThat(replay.accepted.correlationId).isEqualTo(first.accepted.correlationId)
+        assertThat(fixture.insertedSagas).hasSize(1)
+        assertThat(fixture.insertedSagas.single().questionFormat).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormat.MULTIPLE_CHOICE)
+    }
+
+    @Test
+    fun `disabled feature flag preserves preference but generates free text`() = runBlocking<Unit> {
+        val fixture = fixture(null, com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE, enabled = false)
+        fixture.writer.enqueueManual(7, "device-7", 11, "gated-request", fixture.now)
+        assertThat(fixture.insertedSagas.single().questionFormat).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormat.FREE_TEXT)
+        assertThat(fixture.study.questionFormatPreference).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
+    }
+
+    @Test
+    fun `legacy manual generation never consumes objective preference`() = runBlocking<Unit> {
+        val fixture = fixture(null, com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE, contractVersion = 1)
+        fixture.writer.enqueueManual(7, "device-7", 11, "legacy-request", fixture.now)
+        assertThat(fixture.insertedSagas.single().questionFormat).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormat.FREE_TEXT)
+    }
+
+    @Test
+    fun `scheduled generation requires every active delivery device to be capable`() = runBlocking<Unit> {
+        for (capable in listOf(false, true)) {
+            val fixture = fixture(null, com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE, deliveryCapable = capable)
+            fixture.writer.enqueueScheduled(fixture.study, fixture.study, "scheduled-$capable", fixture.now)
+            assertThat(fixture.insertedSagas.single().questionFormat).isEqualTo(
+                if (capable) com.buddystudy.study.domain.entity.QuestionFormat.MULTIPLE_CHOICE else com.buddystudy.study.domain.entity.QuestionFormat.FREE_TEXT,
+            )
+        }
+    }
+
+    private fun fixture(
+        latestStatus: QuestionStatus?,
+        preference: com.buddystudy.study.domain.entity.QuestionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.FREE_TEXT,
+        enabled: Boolean = true,
+        contractVersion: Int = 3,
+        deliveryCapable: Boolean = false,
+    ): Fixture = runBlocking {
         val now = Instant.parse("2026-08-03T00:00:00Z")
         val study = StudyEntity(
             id = 11,
             userId = 7,
             deviceId = "device-7",
             topic = "Redis",
+            questionFormatPreference = preference,
             createdAt = now.minusSeconds(3600),
             updatedAt = now.minusSeconds(3600),
         )
@@ -85,7 +129,8 @@ class QuestionGenerationRequestWriteServiceTest {
             }
 
             override suspend fun findByCorrelationId(correlationId: String) = null
-            override suspend fun findByUserIdAndIdempotencyKey(userId: Long, idempotencyKey: String) = null
+            override suspend fun findByUserIdAndIdempotencyKey(userId: Long, idempotencyKey: String) =
+                insertedSagas.firstOrNull { it.userId == userId && it.idempotencyKey == idempotencyKey }
             override suspend fun findActiveByUserIdAndTopicId(userId: Long, topicId: Long) = null
             override suspend fun markGenerating(correlationId: String, now: Instant) = false
             override suspend fun markTranslating(correlationId: String, questionId: Long, now: Instant) = false
@@ -121,14 +166,22 @@ class QuestionGenerationRequestWriteServiceTest {
             questionKeys = questionKeys,
             sagas = sagas,
             outbox = RecordingOutbox(),
+            properties = com.buddystudy.backend.config.BuddyStudyProperties().apply { multipleChoice.enabled = enabled },
+            clientContract = object : com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort {
+                override suspend fun currentVersion() = contractVersion
+            },
+            deliveryCapability = object : com.buddystudy.backend.study.application.port.outbound.QuestionDeliveryCapabilityPort {
+                override suspend fun supportsMultipleChoice(userId: Long) = deliveryCapable
+            },
         )
-        Fixture(writer, insertedSagas, now)
+        Fixture(writer, insertedSagas, now, study)
     }
 
     private data class Fixture(
         val writer: QuestionGenerationRequestWriteService,
         val insertedSagas: List<com.buddystudy.backend.study.application.model.QuestionGenerationSaga>,
         val now: Instant,
+        val study: StudyEntity,
     )
 
     private class RecordingOutbox : RedisEventOutboxAppendPort {

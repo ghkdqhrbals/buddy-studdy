@@ -99,6 +99,7 @@ class QuestionTranslationExecutionWriteService(
                             "topic" to translation.topic,
                             "question" to translation.question,
                             "hint" to translation.hint,
+                            "choiceOptionsJson" to translation.choiceOptionsJson,
                         ),
                         provider = "question-generation",
                     ),

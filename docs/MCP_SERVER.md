@@ -435,7 +435,9 @@ request_question(study_id, idempotency_key)
 Answer grading:
 
 ```text
-submit_answer(record_id, authored_answer)
+submit_answer(record_id, answer=authored_answer)
+# For MULTIPLE_CHOICE, submit only the user's chosen option ID:
+submit_answer(record_id, selected_option_id=chosen_option_id)
   -> immutable answer persistence + grading Outbox
   -> grading correlationId returned
   -> get_grading_process(correlationId, after_event_id)

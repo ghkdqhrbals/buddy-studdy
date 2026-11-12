@@ -1,4 +1,6 @@
 package com.buddystudy.backend.study.application.service
+import com.buddystudy.study.domain.entity.QuestionFormat
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
 
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
@@ -86,6 +88,7 @@ class QuestionGenerationProcessor(
                 )
             } else prepare(
                 event = event,
+                questionFormat = saga.questionFormat,
                 rootStudy = rootStudy,
                 topicStudy = topicStudy,
                 appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
@@ -257,6 +260,7 @@ class QuestionGenerationProcessor(
 
     private suspend fun prepare(
         event: QuestionGenerationRequestedEvent,
+        questionFormat: QuestionFormat,
         rootStudy: StudyEntity,
         topicStudy: StudyEntity,
         appLanguage: String,
@@ -302,6 +306,7 @@ class QuestionGenerationProcessor(
             candidateBudget = candidateBudget,
             onCandidateRequest = onCandidateRequest,
             onCandidateReceived = onCandidateReceived,
+            questionFormat = questionFormat,
         )
         val now = Instant.now()
         PreparedQuestionGeneration(
@@ -313,6 +318,15 @@ class QuestionGenerationProcessor(
             )
                 .toQuestionEntity()
                 .applyRubric(generated.generated.rubric)
+                .apply {
+                    this.questionFormat = questionFormat
+                    if (questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+                        generated.generated.validateMultipleChoice()
+                        choiceOptionsJson = QuestionChoiceCodec().encode(generated.generated.options)
+                        correctOptionId = generated.generated.correctOptionId
+                        choiceExplanation = generated.generated.explanation
+                    }
+                }
                 .applyCoverage(coverage),
             embedding = generated.embedding,
             coverage = coverage,
@@ -360,6 +374,7 @@ class QuestionGenerationProcessor(
         candidateBudget: Int,
         onCandidateRequest: () -> Unit,
         onCandidateReceived: () -> Unit,
+        questionFormat: QuestionFormat,
     ): GeneratedQuestionWithEmbedding {
         val maxAttempts = minOf(properties.openai.questionSimilarityMaxAttempts.coerceIn(1, MAX_ATTEMPTS), candidateBudget)
         val rejectedQuestions = mutableListOf<String>()
@@ -372,6 +387,7 @@ class QuestionGenerationProcessor(
                 customPrompt = customPrompt,
                 recentQuestions = history,
                 diversity = questionDiversity.choose(topic, studyId, userId, history),
+                questionFormat = questionFormat,
                 coverage = coverageSelection?.let {
                     QuestionCoverageGuide(it.conceptName, it.angleName, it.conceptPath)
                 },
@@ -379,6 +395,7 @@ class QuestionGenerationProcessor(
             onCandidateRequest()
             val generated = openAI.generateQuestion(apiKey, model, prompt)
             onCandidateReceived()
+            if (questionFormat == QuestionFormat.MULTIPLE_CHOICE) generated.validateMultipleChoice()
             if (!QuestionLanguage.matches(generated.question, language)) {
                 rejectedQuestions += generated.question
                 if (attempt == maxAttempts - 1) {
