@@ -55,6 +55,47 @@ prepared with `AFTER_APPROVAL`. Only Korean, English and Japanese `whatsNew`
 changed; inherited public metadata, all 10 screenshot sets / 60 complete images,
 and review contact/demo credentials were preserved.
 
-Backend deployment, exact release build and feature activation run identifiers
-are recorded after their workflows complete. No old-version forced-update
-campaign is part of this rollout.
+Implementation merged in
+[BuddyStudy PR 32](https://github.com/ghkdqhrbals/buddy-studdy/pull/32), source
+`4d2af6465c66e2145ba34a99dc9f9787c51a3aff`. The immutable iOS candidate tag is
+`candidate/ios-1.3.1-mc-20261112`.
+
+[Backend image build 43201603254](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/43201603254)
+succeeded on a GitHub-hosted ARM64 runner. The deployed reference is
+`ghcr.io/ghkdqhrbals/buddystudy-backend:4d2af6465c66e2145ba34a99dc9f9787c51a3aff-jvm@sha256:d6c7a1765bc368a1919f3c240dcc23256dcceafd8b6d56b90c080b4ca48651a1`.
+
+[Preparation deployment 43202732809](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/43202732809)
+succeeded with generation disabled. This backend-only workflow submitted the
+exact image and did not build code on EC2 or deploy monitoring. A manual,
+read-only public search request at 10:50 UTC returned HTTP 200 with response
+contract `1` when the request header was absent, and HTTP 200 with contract `3`
+when `X-BuddyStudy-API-Version: 3` was supplied. Both responses included
+`Vary: X-BuddyStudy-API-Version`. This was not an Actions runtime health gate and
+did not generate questions, consume quota or submit answers.
+
+[iOS release 43201608200](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/43201608200)
+succeeded for the same source, including generic Debug validation, signed Release
+archive, entitlement validation, IPA export and App Store Connect upload.
+At 10:55 UTC, App Store Connect reported iOS **1.3.1 (128)** as `VALID`, build ID
+`da847471-a95b-4b84-88de-e5745e6b991f`, and the 1.3.1 App Store version's build
+relationship pointed to that exact binary. Korean, English and Japanese
+TestFlight testing notes matched the candidate source.
+
+After the supported binary was uploaded and selected, the deployment repository
+variable `BUDDYSTUDY_MULTIPLE_CHOICE_ENABLED` was changed to `true` and read back.
+[Activation deployment 43204681058](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/43204681058)
+succeeded using the same pinned image and backend-only configuration, with
+`promote_swarm=false` and notifications disabled. At 10:57 UTC, manual read-only
+public search requests again returned HTTP 200 with contracts 1 and 3 respectively
+and the version-negotiation `Vary` header. No live generation, vote or learning
+record was created for this operational check.
+
+The feature is enabled for capable contract-3 clients, including the uploaded
+TestFlight/review binary. Public App Store availability still depends on Apple
+approval. No old-version forced-update campaign is part of this rollout.
+
+App Review submission `1d19cd39-b283-498f-b36c-0679a25751c4` contains only this
+1.3.1 version and exact build 128. After submission, both the version and review
+submission read back as `WAITING_FOR_REVIEW`, with `AFTER_APPROVAL` preserved.
+No unrelated review items were submitted. App Store public release is pending
+Apple review; server activation and TestFlight upload are complete.
