@@ -1,5 +1,8 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.common.adapter.inbound.web.ReactiveClientQuestionContractAdapter
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractContext
+import com.buddystudy.backend.common.application.port.outbound.withQuestionApiVersion
 import com.buddystudy.backend.community.application.model.PublicFeedSort
 import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.backend.community.adapter.outbound.persistence.TopicSubscriptionPersistenceAdapter
@@ -55,7 +58,7 @@ class QuestionRepositoryLikedPageTest {
         }
         val converter = MappingR2dbcConverter(mappingContext, conversions)
         entityTemplate = R2dbcEntityTemplate(database, MySqlDialect.INSTANCE, converter)
-        repository = QuestionRepository(entityTemplate, QuestionSearchProjectionManager(database))
+        repository = QuestionRepository(entityTemplate, QuestionSearchProjectionManager(database), ReactiveClientQuestionContractAdapter())
     }
 
     @BeforeEach
@@ -87,6 +90,11 @@ class QuestionRepositoryLikedPageTest {
                 concept_key varchar(255),
                 angle_key varchar(255),
                 question text not null,
+                question_format varchar(32) not null default 'FREE_TEXT',
+                choice_options_json text,
+                correct_option_id varchar(64),
+                choice_explanation text,
+                selected_option_id varchar(64),
                 hint text,
                 topic varchar(255) not null,
                 source_language varchar(16) not null,
@@ -477,6 +485,44 @@ class QuestionRepositoryLikedPageTest {
         assertThat(page.content.map { it.id }).containsExactly(301L)
         assertThat(page.content.single().recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
         assertThat(feed(viewer = 7, scope = PublicFeedScope.FOLLOWING, limit = 1, offset = 1).content).isEmpty()
+    }
+
+    @Test
+    fun `legacy public filtering precedes page counts and preserves canonical voice while modern clients see choices`(): Unit = runBlocking {
+        execute("update questions set question_format = 'MULTIPLE_CHOICE' where id = 101")
+        insertVoice(401)
+        execute("insert into question_likes values (401, 401, 7, timestamp with time zone '2026-06-14 00:00:00+00:00')")
+        val first = repository.findLikedPublicAnsweredVisibleTo(7, null, "ko", 1, 0)
+        val second = repository.findLikedPublicAnsweredVisibleTo(7, null, "ko", 1, 1)
+        assertThat(first.totalElements).isEqualTo(3)
+        assertThat(first.content.map { it.id }).containsExactly(401L)
+        assertThat(first.content.single().recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+        assertThat(second.content.map { it.id }).containsExactly(102L)
+        assertThat(repository.findPublicAnsweredById(101)).isNull()
+        assertThat(repository.findPublicAnsweredByIds(listOf(101, 401)).map { it.id }).containsExactly(401L)
+        assertThat(feed(viewer = 7, query = "needle").totalElements).isZero()
+        withQuestionApiVersion(3) {
+            assertThat(repository.findPublicAnsweredById(101)?.id).isEqualTo(101L)
+            assertThat(repository.findLikedPublicAnsweredVisibleTo(7, null, "ko", 1, 0).totalElements).isEqualTo(4)
+            assertThat(feed(viewer = 7, query = "needle").content.map { it.id }).containsExactly(101L)
+        }
+        assertThat(repository.findPublicAnsweredById(101)).isNull()
+    }
+
+    @Test
+    fun `public search never matches multiple choice answer or explanation secrets`(): Unit = runBlocking(ClientQuestionContractContext(3)) {
+        execute("update questions set question_format = 'MULTIPLE_CHOICE' where id = 101")
+        execute("update question_search set answer = 'secret-answer', feedback = 'secret-feedback', explanation = 'secret-explanation' where question_id = 101")
+        listOf("secret-answer", "secret-feedback", "secret-explanation").forEach { query ->
+            assertThat(repository.findLikedPublicAnsweredVisibleTo(7, query, "ko", 20, 0).content).isEmpty()
+            assertThat(feed(viewer = 7, query = query).content).isEmpty()
+            assertThat(repository.findPublicAnsweredByLanguageAndQueryVisibleTo(7, "ko", query, org.springframework.data.domain.PageRequest.of(0, 20)).content).isEmpty()
+        }
+        assertThat(repository.findLikedPublicAnsweredVisibleTo(7, "needle", "ko", 20, 0).content.map { it.id })
+            .containsExactly(101L)
+        execute("update questions set question_format = 'FREE_TEXT' where id = 101")
+        assertThat(repository.findLikedPublicAnsweredVisibleTo(7, "secret-answer", "ko", 20, 0).content.map { it.id })
+            .containsExactly(101L)
     }
 
     @Test

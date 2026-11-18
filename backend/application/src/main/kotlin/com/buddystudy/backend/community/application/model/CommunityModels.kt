@@ -10,6 +10,8 @@ import com.buddystudy.backend.study.application.model.RecordLocalizationResponse
 import com.buddystudy.backend.study.application.model.VoiceRecordContentResponse
 import com.buddystudy.study.domain.entity.StudyRecordType
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.buddystudy.backend.study.application.model.MultipleChoiceResponse
+import com.buddystudy.study.domain.entity.QuestionFormat
 import java.time.Instant
 
 data class ReportQuestionResponse(val ok: Boolean = true)
@@ -44,6 +46,8 @@ data class CommunityQuestionResponse(
     val isOwnedByMe: Boolean = false,
     @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val timeDisplay: RecordTimeDisplay? = null,
+    val questionFormat: QuestionFormat = QuestionFormat.FREE_TEXT,
+    val multipleChoice: MultipleChoiceResponse? = null,
 )
 
 data class CommunityQuestionsResponse(

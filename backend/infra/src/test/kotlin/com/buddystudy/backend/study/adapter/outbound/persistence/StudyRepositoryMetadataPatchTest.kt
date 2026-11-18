@@ -93,6 +93,7 @@ class StudyRepositoryMetadataPatchTest {
                 notification_sound varchar(100),
                 custom_prompt text not null default '',
                 openai_model varchar(100) not null default 'fixture-model',
+                question_format_preference varchar(32) not null default 'MIXED',
                 max_history_count integer not null default 100,
                 next_due_at timestamp(6),
                 schedule_claimed_until timestamp(6),

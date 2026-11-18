@@ -50,6 +50,8 @@ protocol CommunityRepository {
         view: LocalizedContentView
     ) async throws -> CommunityQuestion
 
+    func voteQuestion(registration: RemotePushRegistration, questionID: String, selectedOptionId: String, language: AppLanguage) async throws -> CommunityQuestion
+
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String,

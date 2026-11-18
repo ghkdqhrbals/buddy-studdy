@@ -504,7 +504,7 @@ final class SettingsStore {
     }
 
     func loadAnswerDraft(recordID: String) -> String {
-        loadAnswerDraftsByRecordID()[recordID] ?? ""
+        loadAnswerDraftsByRecordID()[recordID]?.text ?? ""
     }
 
     func saveAnswerDraft(_ answer: String, recordID: String) {
@@ -512,8 +512,18 @@ final class SettingsStore {
         if answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             drafts.removeValue(forKey: recordID)
         } else {
-            drafts[recordID] = answer
+            drafts[recordID] = StudyAnswerDraft(text: answer)
         }
+        saveAnswerDraftsByRecordID(drafts)
+    }
+
+    func loadChoiceDraft(recordID: String) -> String? {
+        loadAnswerDraftsByRecordID()[recordID]?.selectedOptionId
+    }
+
+    func saveChoiceDraft(_ optionID: String, recordID: String) {
+        var drafts = loadAnswerDraftsByRecordID()
+        drafts[recordID] = StudyAnswerDraft(selectedOptionId: optionID)
         saveAnswerDraftsByRecordID(drafts)
     }
 
@@ -523,15 +533,15 @@ final class SettingsStore {
         saveAnswerDraftsByRecordID(drafts)
     }
 
-    private func loadAnswerDraftsByRecordID() -> [String: String] {
+    private func loadAnswerDraftsByRecordID() -> [String: StudyAnswerDraft] {
         guard let data = defaults.data(forKey: Keys.answerDraftsByRecordID),
-              let drafts = try? decoder.decode([String: String].self, from: data) else {
+              let drafts = try? decoder.decode([String: StudyAnswerDraft].self, from: data) else {
             return [:]
         }
         return drafts
     }
 
-    private func saveAnswerDraftsByRecordID(_ drafts: [String: String]) {
+    private func saveAnswerDraftsByRecordID(_ drafts: [String: StudyAnswerDraft]) {
         if let data = try? encoder.encode(drafts) {
             defaults.set(data, forKey: Keys.answerDraftsByRecordID)
         }

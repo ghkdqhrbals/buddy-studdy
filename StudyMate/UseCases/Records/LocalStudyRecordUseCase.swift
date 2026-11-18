@@ -67,6 +67,9 @@ struct LocalStudyRecordUseCase {
         repository.saveAnswerDraft(answer, recordID: recordID)
     }
 
+    func loadChoiceDraft(recordID: String) -> String? { repository.loadChoiceDraft(recordID: recordID) }
+    func saveChoiceDraft(_ optionID: String, recordID: String) { repository.saveChoiceDraft(optionID, recordID: recordID) }
+
     func deleteAnswerDraft(recordID: String) {
         repository.deleteAnswerDraft(recordID: recordID)
     }

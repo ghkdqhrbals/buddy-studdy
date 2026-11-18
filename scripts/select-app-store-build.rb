@@ -6,6 +6,7 @@ require "json"
 require "net/http"
 require "openssl"
 require "uri"
+require_relative "lib/app_store_build_selection"
 
 API_HOST = "api.appstoreconnect.apple.com"
 DEFAULT_BUNDLE_ID = "io.github.ghkdqhrbals.StudyMate"
@@ -92,11 +93,12 @@ def find_editable_version(token, app_id)
   )
   explicit_id = ENV["APP_STORE_VERSION_ID"]
   versions = response.fetch("data")
-  return versions.find { |item| item.fetch("id") == explicit_id } ||
-    abort("App Store version not found: #{explicit_id}") if explicit_id
-
-  versions.find { |item| EDITABLE_STATES.include?(item.dig("attributes", "appStoreState")) } ||
-    abort("No editable iOS App Store version found")
+  AppStoreBuildSelection.editable_version(versions,
+    editable_states: EDITABLE_STATES,
+    explicit_id: explicit_id,
+    version_string: ENV["APP_STORE_VERSION_STRING"])
+rescue ArgumentError => error
+  abort error.message
 end
 
 def current_build_id(token, version_id)
@@ -147,8 +149,9 @@ def find_build(token, app_id, build_number)
     ).fetch("data")
     [build, prerelease]
   end
-  matches.find { |(_build, prerelease)| prerelease.dig("attributes", "platform") == "IOS" } ||
-    abort("Valid iOS build #{build_number} not found")
+  AppStoreBuildSelection.matching_build(matches, version_string: ENV["APP_STORE_VERSION_STRING"])
+rescue ArgumentError => error
+  abort error.message
 end
 
 def select_build(token, version_id, build_id)

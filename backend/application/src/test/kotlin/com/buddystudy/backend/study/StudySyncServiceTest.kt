@@ -69,7 +69,7 @@ class StudySyncServiceTest {
 
     @Test
     fun `child study page includes only owned direct children in exact sibling order`(): Unit = runBlocking {
-        studies.rows += study(10, "Databases")
+        studies.rows += study(10, "Databases").apply { questionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE }
         studies.rows += study(14, "Fourth").apply { parentStudyId = 10; sortOrder = 2 }
         studies.rows += study(13, "Third").apply { parentStudyId = 10; sortOrder = 1 }
         studies.rows += study(11, "First").apply { parentStudyId = 10; sortOrder = 0 }
@@ -86,6 +86,7 @@ class StudySyncServiceTest {
 
         assertThat(page.studies.map { it.id }).containsExactly(12L, 13L)
         assertThat(page.studies.map { it.parentStudyId }).containsOnly(10L)
+        assertThat(page.studies.map { it.questionFormatPreference }).containsOnly(com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
         assertThat(page.totalCount).isEqualTo(4)
         assertThat(page.limit).isEqualTo(2)
         assertThat(page.offset).isEqualTo(1)
@@ -99,6 +100,20 @@ class StudySyncServiceTest {
         assertThat(studies.saveCalls).isZero()
         assertThat(questions.findPendingByStudyIdCalls).isZero()
         assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `nested child page resolves the shared root once without reading the full tree`() = runBlocking<Unit> {
+        studies.rows += study(10, "Root").apply { questionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.FREE_TEXT }
+        studies.rows += study(20, "Parent").apply { parentStudyId = 10 }
+        studies.rows += study(21, "First child").apply { parentStudyId = 20 }
+        studies.rows += study(22, "Second child").apply { parentStudyId = 20 }
+        val page = service.study(principal, 20, 0, null, "ko", parentStudyId = 20)
+        assertThat(page.studies.map { it.questionFormatPreference }).containsOnly(com.buddystudy.study.domain.entity.QuestionFormatPreference.FREE_TEXT)
+        assertThat(studies.events.count { it == "owned-read" }).isEqualTo(2)
+        assertThat(studies.findByUserCalls).isZero()
+        assertThat(studies.findByUserAndQueryCalls).isZero()
+        assertThat(studies.findByParentCalls).isEqualTo(1)
     }
 
     @Test

@@ -3571,9 +3571,9 @@ final class VoiceTutorContractTests: XCTestCase {
     }
 
     func testProviderFailureLabelIsLocalized() {
-        XCTAssertEqual(AppStrings(language: .korean).voiceTutorProviderCallFailed, "AI 응답 중단됨")
-        XCTAssertEqual(AppStrings(language: .english).voiceTutorProviderCallFailed, "AI response stopped")
-        XCTAssertEqual(AppStrings(language: .japanese).voiceTutorProviderCallFailed, "AIの応答が中断されました")
+        XCTAssertEqual(AppStrings(language: .korean).voiceTutorProviderCallFailed, "버디 응답 중단됨")
+        XCTAssertEqual(AppStrings(language: .english).voiceTutorProviderCallFailed, "Buddy’s response stopped")
+        XCTAssertEqual(AppStrings(language: .japanese).voiceTutorProviderCallFailed, "バディの応答が中断されました")
         XCTAssertEqual(AppStrings(language: .korean).voiceTutorCallUnavailable, "연결 실패")
         XCTAssertEqual(AppStrings(language: .english).voiceTutorCallUnavailable, "Couldn't connect")
         XCTAssertEqual(AppStrings(language: .japanese).voiceTutorCallUnavailable, "接続できません")

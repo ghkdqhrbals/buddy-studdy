@@ -15,6 +15,9 @@ interface UserPort {
 }
 
 interface DevicePort {
+    /** Partial update avoids overwriting notification/profile fields during capability observation. */
+    suspend fun updateQuestionApiVersion(deviceId: String, userId: Long, version: Int): Int = 0
+
     suspend fun save(entity: DeviceEntity): DeviceEntity
     suspend fun findByDeviceId(deviceId: String): DeviceEntity?
     suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity?

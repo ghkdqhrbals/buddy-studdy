@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort
+import com.buddystudy.backend.common.application.port.outbound.LegacyClientQuestionContract
 import com.buddystudy.backend.community.application.model.TopicSubscriptionPolicy
 import com.buddystudy.backend.community.application.model.PublicFeedSort
 import com.buddystudy.backend.community.application.model.PublicFeedScope
@@ -30,6 +32,7 @@ import java.time.Instant
 class QuestionRepository(
     private val template: R2dbcEntityTemplate,
     private val searchProjection: QuestionSearchProjectionManager,
+    private val clientQuestionContract: ClientQuestionContractPort = LegacyClientQuestionContract,
 ) : QuestionPort {
     override suspend fun lockThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
         template.databaseClient.sql(
@@ -477,9 +480,9 @@ class QuestionRepository(
         val searchCondition = if (normalizedQuery == null) "true" else """
             (lower(coalesce(qs.topic, '')) like :pattern
              or lower(coalesce(qs.question, '')) like :pattern
-             or lower(coalesce(qs.answer, '')) like :pattern
-             or lower(coalesce(qs.feedback, '')) like :pattern
-             or lower(coalesce(qs.explanation, '')) like :pattern
+             or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.answer, '')) like :pattern)
+             or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.feedback, '')) like :pattern)
+             or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.explanation, '')) like :pattern)
              or lower(u.display_name) like :pattern)
         """.trimIndent()
         // Normalize both display labels in the same engine: JVM/Swift full Unicode lowercase
@@ -504,7 +507,7 @@ class QuestionRepository(
             join users u on u.id = q.user_id
             left join question_stats stats on stats.question_id = q.id
             $searchJoin
-            where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
+            where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION and ${publicQuestionFormatCondition()}
               and u.allow_public_questions = true and $searchCondition
               $blockCondition $followingCondition
         """.trimIndent()
@@ -574,9 +577,9 @@ class QuestionRepository(
             (
                 lower(coalesce(qs.topic, '')) like :pattern
                 or lower(coalesce(qs.question, '')) like :pattern
-                or lower(coalesce(qs.answer, '')) like :pattern
-                or lower(coalesce(qs.feedback, '')) like :pattern
-                or lower(coalesce(qs.explanation, '')) like :pattern
+                or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.answer, '')) like :pattern)
+                or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.feedback, '')) like :pattern)
+                or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.explanation, '')) like :pattern)
                 or lower(u.display_name) like :pattern
             )
             """.trimIndent()
@@ -590,7 +593,7 @@ class QuestionRepository(
             where ql.user_id = :viewerUserId
               and q.is_public = true
               and q.deleted_at is null
-              and $PUBLIC_ANSWER_CONDITION
+              and $PUBLIC_ANSWER_CONDITION and ${publicQuestionFormatCondition()}
               and u.allow_public_questions = true
               and $searchCondition
               $BLOCKED_AUTHOR_EXCLUSION
@@ -637,6 +640,15 @@ class QuestionRepository(
             language = QuestionLanguage.normalize(language),
         ).firstOrNull()?.let { findQuestionById(it) }
 
+    override suspend fun lockPublicAnsweredById(id: Long): QuestionEntity? = template.databaseClient.sql(
+        """
+        select q.* from questions q join users u on u.id = q.user_id
+        where q.id = :id and q.is_public = true and q.deleted_at is null
+          and $PUBLIC_ANSWER_CONDITION and ${publicQuestionFormatCondition()} and u.allow_public_questions = true
+        for update
+        """.trimIndent(),
+    ).bind("id", id).map { row, _ -> template.converter.read(QuestionEntity::class.java, row) }.one().awaitSingleOrNull()
+
     override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> {
         if (ids.isEmpty()) return emptyList()
         val idMarkers = indexedBindMarkers("questionId", ids.size)
@@ -644,7 +656,7 @@ class QuestionRepository(
             """
             select q.id from questions q join users u on u.id = q.user_id
             where q.id in ($idMarkers) and q.is_public = true and q.deleted_at is null
-              and $PUBLIC_ANSWER_CONDITION and u.allow_public_questions = true
+              and $PUBLIC_ANSWER_CONDITION and ${publicQuestionFormatCondition()} and u.allow_public_questions = true
             """.trimIndent(),
         ).bindIndexed("questionId", ids.toList())
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
@@ -755,9 +767,9 @@ class QuestionRepository(
             filter.second && language != null ->
                 "(lower(coalesce(qs.topic, '')) like :pattern " +
                     "or lower(coalesce(qs.question, '')) like :pattern " +
-                    "or lower(coalesce(qs.answer, '')) like :pattern " +
-                    "or lower(coalesce(qs.feedback, '')) like :pattern " +
-                    "or lower(coalesce(qs.explanation, '')) like :pattern " +
+                    "or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.answer, '')) like :pattern) " +
+                    "or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.feedback, '')) like :pattern) " +
+                    "or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.explanation, '')) like :pattern) " +
                     "or lower(u.display_name) like :pattern)"
             filter.second ->
                 """
@@ -768,9 +780,9 @@ class QuestionRepository(
                           and (
                             lower(coalesce(qs.topic, '')) like :pattern
                             or lower(coalesce(qs.question, '')) like :pattern
-                            or lower(coalesce(qs.answer, '')) like :pattern
-                            or lower(coalesce(qs.feedback, '')) like :pattern
-                            or lower(coalesce(qs.explanation, '')) like :pattern
+                            or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.answer, '')) like :pattern)
+                            or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.feedback, '')) like :pattern)
+                            or (q.question_format = 'FREE_TEXT' and lower(coalesce(qs.explanation, '')) like :pattern)
                           )
                     )
                     or lower(u.display_name) like :pattern
@@ -897,7 +909,7 @@ class QuestionRepository(
             .all().collectList().awaitSingle()
     }
 
-    private fun publicSelectSql(
+    private suspend fun publicSelectSql(
         condition: String,
         searchLanguage: String? = null,
         filterBlockedAuthors: Boolean = false,
@@ -908,14 +920,14 @@ class QuestionRepository(
         val blockCondition = if (filterBlockedAuthors) BLOCKED_AUTHOR_EXCLUSION else ""
         return """
         select q.id from questions q join users u on u.id = q.user_id $searchJoin
-        where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
+        where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION and ${publicQuestionFormatCondition()}
           and u.allow_public_questions = true and ($condition)
           $blockCondition
         order by q.created_at desc, q.id desc limit :limit offset :offset
         """.trimIndent()
     }
 
-    private fun publicCountSql(
+    private suspend fun publicCountSql(
         condition: String,
         searchLanguage: String? = null,
         filterBlockedAuthors: Boolean = false,
@@ -926,11 +938,14 @@ class QuestionRepository(
         val blockCondition = if (filterBlockedAuthors) BLOCKED_AUTHOR_EXCLUSION else ""
         return """
         select count(*) as total from questions q join users u on u.id = q.user_id $searchJoin
-        where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
+        where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION and ${publicQuestionFormatCondition()}
           and u.allow_public_questions = true and ($condition)
           $blockCondition
         """.trimIndent()
     }
+
+    private suspend fun publicQuestionFormatCondition(): String =
+        if (clientQuestionContract.currentVersion() >= 3) "true" else "q.question_format = 'FREE_TEXT'"
 
     private suspend fun findOrdered(ids: List<Long>): List<QuestionEntity> {
         if (ids.isEmpty()) return emptyList()

@@ -9,6 +9,7 @@ import com.buddystudy.backend.community.application.port.inbound.CommunityUseCas
 import com.buddystudy.backend.community.adapter.inbound.web.dto.CommunityCommentRequest
 import com.buddystudy.backend.community.adapter.inbound.web.dto.ReportQuestionRequest
 import com.buddystudy.backend.community.adapter.inbound.web.dto.SubmitFeedbackRequest
+import com.buddystudy.backend.community.adapter.inbound.web.dto.PublicQuestionVoteRequest
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.model.PublicFeedSort
@@ -51,7 +52,7 @@ class CommunityController(
 ) {
     @Operation(
         summary = "List public completed questions",
-        description = "Returns completed questions that are public both at the user level and at the individual record level. The list includes author profile data, answer, grading feedback, and aggregated view/like/comment counts.",
+        description = "Returns completed questions that are public at the user and record levels. Multiple-choice options are visible before participation; answers, explanations and response distributions are disclosed only after the current viewer selects an option.",
     )
     @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned."))
     @GetMapping("/public/questions")
@@ -101,7 +102,7 @@ class CommunityController(
         authentication,
     )
 
-    @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
+    @Operation(summary = "Fetch one public question", description = "Returns a public completed question and reaction statistics. Multiple-choice answers and distributions remain hidden until the viewer participates. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
     suspend fun getPublicQuestion(
         @Parameter(description = "Public question id.", example = "42")
@@ -113,6 +114,18 @@ class CommunityController(
         @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication?,
     ) = community.getPublicQuestion(id, targetLanguage(tl, language), view, authentication)
+
+    @Operation(summary = "Answer a public multiple-choice question", description = "Stores one immutable selection per account and returns choices, counts, percentages, and the answer after participation. Repeating the same selection is idempotent.")
+    @PutMapping("/public/questions/{id}/vote")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_VOTE)
+    suspend fun votePublicQuestion(
+        @PathVariable id: Long,
+        @Valid @RequestBody body: PublicQuestionVoteRequest,
+        @RequestParam(required = false) tl: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
+        authentication: Authentication,
+    ): Any = community.votePublicQuestion(id, body, targetLanguage(tl, language), view, authentication)
 
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
@@ -346,6 +359,7 @@ interface CommunityWebPort {
     suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun getLikedPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any
     suspend fun getPublicQuestionV2(id: Long, language: String, view: String, authentication: Authentication?): Any
+    suspend fun votePublicQuestion(id: Long, body: PublicQuestionVoteRequest, language: String, view: String, authentication: Authentication): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun getComments(
@@ -423,6 +437,9 @@ class CommunityWebAdapter(
 
     override suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?) =
         community.getPublicQuestion(authentication.optionalPrincipal(), id, language, view)
+
+    override suspend fun votePublicQuestion(id: Long, body: PublicQuestionVoteRequest, language: String, view: String, authentication: Authentication) =
+        community.votePublicQuestion(authentication.principalOrThrow(), id, body.selectedOptionId, language, view)
 
     override suspend fun likePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
 

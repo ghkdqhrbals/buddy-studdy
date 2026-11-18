@@ -101,6 +101,10 @@ struct CommunityUseCase {
         )
     }
 
+    func voteQuestion(registration: RemotePushRegistration, questionID: String, selectedOptionId: String, language: AppLanguage) async throws -> CommunityQuestion {
+        try await repository.voteQuestion(registration: registration, questionID: questionID, selectedOptionId: selectedOptionId, language: language)
+    }
+
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String,

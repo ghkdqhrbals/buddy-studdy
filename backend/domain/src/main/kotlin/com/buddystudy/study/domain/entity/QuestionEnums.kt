@@ -62,3 +62,8 @@ enum class AnswerGradingStatus {
     val terminal: Boolean
         get() = this == COMPLETED || this == FAILED
 }
+
+/** Presentation and scoring format, independent from where a question originated. */
+enum class QuestionFormat { FREE_TEXT, MULTIPLE_CHOICE }
+
+enum class QuestionFormatPreference { FREE_TEXT, MULTIPLE_CHOICE, MIXED }

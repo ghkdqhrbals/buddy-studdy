@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import XCTest
+import SwiftUI
+import UIKit
 @testable import StudyMate
 
 @MainActor
@@ -6220,6 +6222,338 @@ final class QuestionGenerationFlowTests: XCTestCase {
             followUpDepth: depth,
             source: depth == 0 ? "manual" : "follow_up"
         )
+    }
+
+    func testQuestionAPIVersionNegotiatesBackendButNotExternalRecordingUpload() async throws {
+        let sessionID = "00000000-0000-4000-8000-000000000077"
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("synthetic-upload-\(UUID().uuidString).m4a")
+        try Data("synthetic recording payload".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        var paths: [String] = []
+        let client = makeClient { request in
+            paths.append(request.url?.path ?? "")
+            if request.url?.host == "storage.test" {
+                XCTAssertEqual(request.httpMethod, "PUT")
+                XCTAssertNil(request.value(forHTTPHeaderField: "X-BuddyStudy-API-Version"))
+                XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                XCTAssertNil(request.value(forHTTPHeaderField: "X-Device-Id"))
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "audio/mp4")
+                return Self.response(for: request, statusCode: 200, body: "{}")
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-BuddyStudy-API-Version"), "3")
+            if request.httpMethod == "GET" {
+                return Self.response(for: request, statusCode: 200, body: "{\"sessionId\":\"\(sessionID)\",\"state\":\"COMPLETED\",\"recording\":{\"available\":false}}")
+            }
+            if request.url?.path.hasSuffix("/complete") == true {
+                return Self.response(for: request, statusCode: 204, body: "")
+            }
+            return Self.response(for: request, statusCode: 200, body: "{\"recordingId\":\"\(sessionID)\",\"uploadUrl\":\"https://storage.test/recording.m4a\",\"headers\":{\"Content-Type\":\"audio/mp4\",\"X-BuddyStudy-API-Version\":\"3\"}}")
+        }
+        try await client.uploadVoiceTutorRecording(registration: Self.signedInRegistration, sessionID: sessionID, fileURL: file, contentType: "audio/mp4", contentLength: 27, sha256: String(repeating: "0", count: 64), durationMilliseconds: 1)
+        XCTAssertEqual(paths.count, 4)
+        XCTAssertEqual(paths[2], "/recording.m4a")
+        XCTAssertTrue(paths[3].hasSuffix("/complete"))
+    }
+
+    func testRegistrationAdvertisesQuestionAPIVersionThree() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/devices/register")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-BuddyStudy-API-Version"), "3")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any])
+            XCTAssertEqual(body["questionApiVersion"] as? Int, 3)
+            return Self.response(for: request, statusCode: 200, body: #"{"deviceId":"device-1","clientSecret":"secret","accessToken":"token","accessTokenExpiresAt":"2030-01-01T00:00:00Z"}"#)
+        }
+        let result = try await client.registerDevice(installationIdentifier: "installation-v3", apnsToken: nil, language: .korean, timezone: "Asia/Seoul", apnsEnvironment: "sandbox")
+        XCTAssertEqual(result.deviceID, "device-1")
+    }
+
+    func testChoiceParticipationMergePreservesDisplayedLabelsByStableID() {
+        let original = MultipleChoiceQuestion(options: [MultipleChoiceOption(id: "a", text: "Read committed"), MultipleChoiceOption(id: "b", text: "Serializable")])
+        let localizedResult = MultipleChoiceQuestion(options: [MultipleChoiceOption(id: "b", text: "직렬화 가능", count: 2, percentage: 66.7), MultipleChoiceOption(id: "a", text: "커밋된 읽기", count: 1, percentage: 33.3)], selectedOptionId: "b", totalParticipants: 3, correctOptionId: "b", isCorrect: true)
+        let merged = original.applyingParticipation(localizedResult)
+        XCTAssertEqual(merged.options.map(\.id), ["a", "b"])
+        XCTAssertEqual(merged.options.map(\.text), ["Read committed", "Serializable"])
+        XCTAssertEqual(merged.options.map(\.count), [1, 2])
+        XCTAssertEqual(merged.selectedOptionId, "b")
+        XCTAssertEqual(merged.correctOptionId, "b")
+        XCTAssertEqual(merged.totalParticipants, 3)
+    }
+
+    func testMultipleChoiceRecordDecodesTopLevelMetadataAndRoundTripsStorage() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(StudyRecord.self, from: Data(Self.choiceRecordJSON.utf8))
+        XCTAssertEqual(record.question.questionFormat, .multipleChoice)
+        XCTAssertEqual(record.question.multipleChoice?.options.map(\.id), ["a", "b"])
+        XCTAssertNil(record.question.multipleChoice?.correctOptionId)
+        XCTAssertEqual(record.question.multipleChoice?.selectedOptionId, "b")
+        XCTAssertEqual(record.questionStatus, .grading)
+        let stored = try JSONDecoder().decode(StudyRecord.self, from: JSONEncoder().encode(record))
+        XCTAssertEqual(stored, record)
+        let legacy = QuestionItem(question: "Written question", createdAt: Date())
+        let legacyJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as! [String: Any]
+        var withoutFormat = legacyJSON
+        withoutFormat.removeValue(forKey: "questionFormat")
+        let decoded = try JSONDecoder().decode(QuestionItem.self, from: JSONSerialization.data(withJSONObject: withoutFormat))
+        XCTAssertEqual(decoded.questionFormat, .freeText)
+    }
+
+    func testMultipleChoiceDraftMigratesLegacyTextWithoutReplacingOtherDrafts() throws {
+        let suite = "ChoiceDrafts-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(try JSONEncoder().encode(["written": "Preserve my unfinished answer"]), forKey: "answerDraftsByRecordID")
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        XCTAssertEqual(store.loadAnswerDraft(recordID: "written"), "Preserve my unfinished answer")
+        store.saveChoiceDraft("b", recordID: "quiz")
+        let relaunched = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        XCTAssertEqual(relaunched.loadChoiceDraft(recordID: "quiz"), "b")
+        XCTAssertEqual(relaunched.loadAnswerDraft(recordID: "written"), "Preserve my unfinished answer")
+        XCTAssertEqual(relaunched.loadAnswerDraft(recordID: "quiz"), "")
+        relaunched.deleteAnswerDraft(recordID: "quiz")
+        XCTAssertNil(relaunched.loadChoiceDraft(recordID: "quiz"))
+        XCTAssertEqual(relaunched.loadAnswerDraft(recordID: "written"), "Preserve my unfinished answer")
+    }
+
+    func testQuestionFormatPreferenceDefaultsMixedAndSurvivesCategoryNormalization() throws {
+        let legacy = Data(#"{"id":"root","title":"Databases"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(StudyCategory.self, from: legacy).questionFormatPreference, .mixed)
+        let root = StudyCategory(id: "root", title: "Databases", questionFormatPreference: .multipleChoice)
+        let settings = StudySettings(topic: root.title, difficulty: .beginner, customPrompt: "", intervalMinutes: 30, studyCategories: [root])
+        XCTAssertEqual(settings.studyCategories.first?.questionFormatPreference, .multipleChoice)
+        let decoded = try JSONDecoder().decode(StudySettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertEqual(decoded.studyCategories.first?.questionFormatPreference, .multipleChoice)
+        for language in AppLanguage.allCases {
+            let strings = AppStrings(language: language)
+            XCTAssertFalse(QuestionFormatPreference.mixed.title(strings: strings).isEmpty)
+            XCTAssertFalse(strings.chooseAnswer.isEmpty)
+        }
+    }
+
+    func testOwnerChoiceSubmissionPersistsAcceptedAsyncAnswerAfterScreenLeaves() async throws {
+        let suite = "ChoiceOwner-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let database = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).sqlite")
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: database) }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: database)
+        let record = StudyRecord(id: "quiz-1", question: QuestionItem(question: "Which isolation level?", createdAt: Date(), questionFormat: .multipleChoice, multipleChoice: Self.unansweredChoice), topic: "Databases", difficulty: .intermediate)
+        store.saveStudyRecord(record)
+        let count = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.httpMethod == "POST", request.url?.path == "/api/v1/records/quiz-1/answer" else { return 0 }
+            count.increment()
+            return 200_000_000
+        }
+        let client = makeClient { request in
+            guard request.httpMethod == "POST", request.url?.path == "/api/v1/records/quiz-1/answer" else {
+                return Self.response(for: request, statusCode: 404, body: "{}")
+            }
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-BuddyStudy-API-Version"), "3")
+            XCTAssertEqual(request.url?.path, "/api/v1/records/quiz-1/answer")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any])
+            XCTAssertEqual(body["selectedOptionId"] as? String, "b")
+            XCTAssertNil(body["answer"])
+            return Self.response(for: request, statusCode: 202, body: Self.choiceRecordJSON)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        let owner = "choice-screen"
+        let submission = Task { @MainActor in await appState.submitStudyChoice(record, optionID: "b", pollingOwnerID: owner) }
+        let started = await waitUntil { count.value > 0 }
+        XCTAssertTrue(started)
+        XCTAssertEqual(store.loadChoiceDraft(recordID: record.id), "b")
+        await appState.submitStudyChoice(record, optionID: "a", pollingOwnerID: "duplicate")
+        appState.cancelAnswerGradingPolling(ownerID: owner, reason: "choice-test-disappeared")
+        await submission.value
+        let saved = try XCTUnwrap(store.loadStudyRecords().first(where: { $0.id == record.id }))
+        XCTAssertEqual(saved.question.multipleChoice?.selectedOptionId, "b")
+        XCTAssertEqual(saved.gradingRequestID, "grade-choice")
+        XCTAssertEqual(saved.questionStatus, .grading)
+        XCTAssertNil(store.loadChoiceDraft(recordID: record.id))
+        XCTAssertEqual(count.value, 1)
+    }
+
+    func testOwnerChoiceAcceptedFromPreviousAccountIsNotPersisted() async throws {
+        let suite = "ChoiceOwnerSession-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let database = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).sqlite")
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: database) }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: database)
+        let record = StudyRecord(id: "quiz-1", question: QuestionItem(question: "Which isolation level?", createdAt: Date(), questionFormat: .multipleChoice, multipleChoice: Self.unansweredChoice), topic: "Databases", difficulty: .intermediate)
+        store.saveStudyRecord(record)
+        let events = TestAppNotificationEventProvider()
+        let count = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.httpMethod == "POST", request.url?.path == "/api/v1/records/quiz-1/answer" else { return 0 }
+            count.increment()
+            return 200_000_000
+        }
+        let client = makeClient { request in
+            guard request.httpMethod == "POST", request.url?.path == "/api/v1/records/quiz-1/answer" else {
+                return Self.response(for: request, statusCode: 404, body: "{}")
+            }
+            return Self.response(for: request, statusCode: 202, body: Self.choiceRecordJSON)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client, appNotificationEventProvider: events)
+        let submission = Task { @MainActor in await appState.submitStudyChoice(record, optionID: "b", pollingOwnerID: "old-owner") }
+        let started = await waitUntil { count.value > 0 }
+        XCTAssertTrue(started)
+        try events.sendBackendUnauthorized(for: XCTUnwrap(store.loadRemotePushRegistration()))
+        await submission.value
+        XCTAssertNil(store.loadStudyRecords().first(where: { $0.id == record.id })?.question.multipleChoice?.selectedOptionId)
+        XCTAssertNil(store.loadStudyRecords().first(where: { $0.id == record.id })?.gradingRequestID)
+    }
+
+    func testRootQuestionFormatPreferenceUsesExistingStudySettingsAPI() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/v1/studies/11/settings")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any])
+            XCTAssertEqual(body["questionFormatPreference"] as? String, "MULTIPLE_CHOICE")
+            return Self.response(for: request, statusCode: 200, body: "{}")
+        }
+        let category = StudyCategory(id: "11", title: "Databases", questionFormatPreference: .multipleChoice)
+        let settings = StudySettings(topic: category.title, difficulty: .beginner, customPrompt: "", intervalMinutes: 30, studyCategories: [category])
+        try await client.updateStudy(registration: Self.signedInRegistration, studyID: 11, category: category, settings: settings)
+    }
+
+    func testPublicChoiceUpdatesAllFeedStateWithoutCreatingLearningRecord() async throws {
+        let suite = "ChoicePublic-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let database = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).sqlite")
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: database) }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: database)
+        let count = LockedRequestCounter()
+        let client = makeClient { request in
+            if request.httpMethod == "GET" {
+                let refreshed = Self.choicePublicJSON.replacingOccurrences(of: "\"totalParticipants\":3", with: "\"totalParticipants\":4").replacingOccurrences(of: "\"count\":2", with: "\"count\":3")
+                return Self.response(for: request, statusCode: 200, body: "{\"questions\":[" + refreshed + "],\"totalCount\":1,\"limit\":20,\"offset\":0}")
+            }
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/quiz-1/vote")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any])
+            XCTAssertEqual(body["selectedOptionId"] as? String, "b")
+            count.increment()
+            return Self.response(for: request, statusCode: 200, body: Self.choicePublicJSON)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        var question = Self.publicChoiceQuestion()
+        question.likeCount = 6
+        question.isLikedByMe = true
+        appState.communityQuestions = [question]
+        let originalRecordIDs = store.loadStudyRecords().map(\.id)
+        await appState.submitCommunityChoice(question, optionID: "b")
+        XCTAssertEqual(appState.communityQuestions.first?.multipleChoice?.selectedOptionId, "b")
+        XCTAssertEqual(appState.communityQuestions.first?.likeCount, 6)
+        XCTAssertEqual(appState.communityQuestions.first?.isLikedByMe, true)
+        XCTAssertEqual(appState.currentCommunityQuizQuestion(question).multipleChoice?.totalParticipants, 3)
+        guard case .publicQuestion(let card) = appState.communityFeedItems.first else { return XCTFail("Missing question card") }
+        XCTAssertEqual(card.multipleChoice?.options.last?.count, 2)
+        XCTAssertEqual(card.multipleChoice?.correctOptionId, "b")
+        await appState.submitCommunityChoice(question, optionID: "a")
+        XCTAssertEqual(count.value, 1)
+        await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+        var refreshed = try XCTUnwrap(appState.communityQuestions.first)
+        XCTAssertEqual(appState.currentCommunityQuizQuestion(refreshed).multipleChoice?.totalParticipants, 4)
+        XCTAssertEqual(appState.currentCommunityQuizQuestion(question).multipleChoice?.totalParticipants, 4)
+        refreshed.isLikedByMe = true
+        refreshed.likeCount = 8
+        XCTAssertEqual(appState.currentCommunityQuizQuestion(refreshed).likeCount, 8)
+        XCTAssertTrue(appState.currentCommunityQuizQuestion(refreshed).isLikedByMe)
+        XCTAssertEqual(store.loadStudyRecords().map(\.id), originalRecordIDs)
+    }
+
+    func testLatePublicChoiceResponseCannotRestorePreviousAccountsChoice() async throws {
+        let suite = "ChoiceSession-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let database = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).sqlite")
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: database) }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: database)
+        let events = TestAppNotificationEventProvider()
+        let count = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.httpMethod == "PUT", request.url?.path == "/api/v1/public/questions/quiz-1/vote" else { return 0 }
+            count.increment()
+            return 200_000_000
+        }
+        let client = makeClient { request in
+            guard request.httpMethod == "PUT", request.url?.path == "/api/v1/public/questions/quiz-1/vote" else {
+                return Self.response(for: request, statusCode: 404, body: "{}")
+            }
+            return Self.response(for: request, statusCode: 200, body: Self.choicePublicJSON)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client, appNotificationEventProvider: events)
+        let question = Self.publicChoiceQuestion()
+        appState.communityQuestions = [question]
+        let pending = Task { @MainActor in await appState.submitCommunityChoice(question, optionID: "b") }
+        let started = await waitUntil { count.value > 0 }
+        XCTAssertTrue(started)
+        try events.sendBackendUnauthorized(for: XCTUnwrap(store.loadRemotePushRegistration()))
+        await pending.value
+        XCTAssertFalse(appState.isCommunitySessionActive)
+        XCTAssertNil(appState.currentCommunityQuizQuestion(question).multipleChoice?.selectedOptionId)
+        XCTAssertNil(appState.communityChoiceIntent(questionID: question.id))
+        XCTAssertFalse(appState.isCommunityChoicePending(questionID: question.id))
+    }
+
+    func testMultipleChoiceComponentRendersBeforeAndAfterAnswer() throws {
+        let before = MultipleChoiceOptionsView(choice: Self.unansweredChoice, strings: AppStrings(language: .english)) { _ in }
+            .padding().frame(width: 360).background(Color.white)
+        let beforeRenderer = ImageRenderer(content: before)
+        beforeRenderer.scale = 2
+        let beforeImage = try XCTUnwrap(beforeRenderer.uiImage)
+        let beforeAttachment = XCTAttachment(image: beforeImage)
+        beforeAttachment.name = "multiple-choice-before-answer"
+        beforeAttachment.lifetime = .keepAlways
+        add(beforeAttachment)
+        var answered = Self.unansweredChoice
+        answered.selectedOptionId = "b"
+        answered.correctOptionId = "b"
+        answered.totalParticipants = 3
+        answered.explanation = "Serializable prevents concurrent anomalies."
+        answered.options[0].count = 1
+        answered.options[0].percentage = 33.3
+        answered.options[1].count = 2
+        answered.options[1].percentage = 66.7
+        let afterRenderer = ImageRenderer(content: MultipleChoiceOptionsView(choice: answered, strings: AppStrings(language: .english)) { _ in }
+            .padding().frame(width: 360).background(Color.white))
+        afterRenderer.scale = 2
+        let afterImage = try XCTUnwrap(afterRenderer.uiImage)
+        let attachment = XCTAttachment(image: afterImage)
+        attachment.name = "multiple-choice-after-answer"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertGreaterThan(afterImage.size.height, beforeImage.size.height)
+        var largeChoice = Self.unansweredChoice
+        largeChoice.options.append(MultipleChoiceOption(id: "c", text: "Repeatable read with a deliberately long explanation that must wrap within the option row"))
+        largeChoice.options.append(MultipleChoiceOption(id: "d", text: "Read uncommitted"))
+        let largeRenderer = ImageRenderer(content: MultipleChoiceOptionsView(choice: largeChoice, strings: AppStrings(language: .korean)) { _ in }
+            .padding().frame(width: 360).dynamicTypeSize(.accessibility2).background(Color.white))
+        largeRenderer.scale = 2
+        let largeImage = try XCTUnwrap(largeRenderer.uiImage)
+        let largeAttachment = XCTAttachment(image: largeImage)
+        largeAttachment.name = "multiple-choice-four-options-large-text"
+        largeAttachment.lifetime = .keepAlways
+        add(largeAttachment)
+        XCTAssertEqual(largeImage.size.width, beforeImage.size.width)
+        XCTAssertGreaterThan(largeImage.size.height, beforeImage.size.height)
+    }
+
+    private static var unansweredChoice: MultipleChoiceQuestion {
+        MultipleChoiceQuestion(options: [MultipleChoiceOption(id: "a", text: "Read committed"), MultipleChoiceOption(id: "b", text: "Serializable")])
+    }
+
+    private static func publicChoiceQuestion() -> CommunityQuestion {
+        CommunityQuestion(id: "quiz-1", question: "Which isolation level?", answer: nil, gradingResult: nil, topic: "Databases", difficultyLevel: 5, status: "graded", source: "manual", createdAt: Date(), answeredAt: Date(), author: nil, questionFormat: .multipleChoice, multipleChoice: unansweredChoice)
+    }
+
+    private static var choiceRecordJSON: String {
+        #"{"id":"quiz-1","question":{"question":"Which isolation level?","createdAt":"2026-11-12T00:00:00Z"},"answer":"Serializable","topic":"Databases","difficulty":5,"questionStatus":"GRADING","gradingStatus":"QUEUED","gradingRequestId":"grade-choice","correlationId":"grade-choice","gradingLastEventId":1,"questionFormat":"MULTIPLE_CHOICE","multipleChoice":{"options":[{"id":"a","text":"Read committed"},{"id":"b","text":"Serializable"}],"selectedOptionId":"b"}}"#
+    }
+
+    private static var choicePublicJSON: String {
+        #"{"id":"quiz-1","question":"Which isolation level?","topic":"Databases","difficultyLevel":5,"status":"graded","source":"manual","createdAt":"2026-11-12T00:00:00Z","questionFormat":"MULTIPLE_CHOICE","multipleChoice":{"options":[{"id":"a","text":"Read committed","count":1,"percentage":33.3},{"id":"b","text":"Serializable","count":2,"percentage":66.7}],"selectedOptionId":"b","totalParticipants":3,"correctOptionId":"b","isCorrect":true,"explanation":"Serializable prevents concurrent anomalies."}}"#
     }
 
     private func makeClient(

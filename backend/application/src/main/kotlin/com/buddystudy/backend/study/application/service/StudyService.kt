@@ -1,6 +1,12 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort
+import com.buddystudy.backend.common.application.port.outbound.LegacyClientQuestionContract
+import com.buddystudy.backend.study.application.model.forQuestionContract
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
+import com.buddystudy.study.domain.entity.QuestionFormat
+import java.text.Normalizer
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -54,6 +60,7 @@ class StudyService(
     private val contentLocalizations: ContentLocalizationPort,
     private val localizationRequests: RequestContentLocalizationUseCase,
     private val voiceRecordProjector: VoiceRecordContentProjector = VoiceRecordContentProjector(UnavailableVoiceStudyLearningLocalizationPort),
+    private val clientContract: ClientQuestionContractPort = LegacyClientQuestionContract,
 ) : StudyUseCase, BrowseRecordsUseCase {
     // Localized voice reads may enqueue missing translations in the same transaction.
     @Transactional
@@ -64,6 +71,22 @@ class StudyService(
         view: String,
     ): List<StudyRecordResponse> = questions.findOwnedRecordsByIds(principal.userId, ids)
         .toRecordResponses(QuestionLanguage.normalize(language), translationViewMode(view))
+    override suspend fun answerChoice(principal: Principal, recordId: Long, selectedOptionId: String): StudyRecordResponse {
+        val language = QuestionLanguage.normalize(users.findById(principal.userId)?.appLanguage?.databaseValue)
+        val queued = gradingWriter.queueChoice(principal.userId, recordId, selectedOptionId, language, Instant.now())
+        outboxPublisher.publishNow(queued.outboxes)
+        val projected = project(queued.question, language, TranslationViewMode.LOCALIZED)
+        return projected.question.toStudyRecord(questionStats.findById(recordId)).toProjection().toRecordResponse(
+            requestedLanguage = language,
+            questionDisplayLanguage = projected.questionDisplayLanguage,
+            answerDisplayLanguage = projected.answerDisplayLanguage,
+            aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
+            questionTranslationPending = projected.questionTranslationPending,
+            answerTranslationPending = projected.answerTranslationPending,
+            aiResponseTranslationPending = projected.aiResponseTranslationPending,
+            answerAuthorOriginal = projected.answerAuthorOriginal,
+        ).forQuestionContract(clientContract.currentVersion())
+    }
 
     override suspend fun answer(
         principal: Principal,
@@ -72,6 +95,17 @@ class StudyService(
         sourceLanguage: String?,
         grade: Boolean,
     ): StudyRecordResponse {
+        if (grade && clientContract.currentVersion() < 3) {
+            val question = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
+            if (question?.questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+                val number = Normalizer.normalize(answer, Normalizer.Form.NFKC).trim()
+                val options = QuestionChoiceCodec().decode(question.choiceOptionsJson)
+                val selected = number.takeIf { it.matches(Regex("[1-4]")) }?.toIntOrNull()
+                    ?.let { options.getOrNull(it - 1) }
+                    ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Enter only a valid answer number.")
+                return answerChoice(principal, recordId, selected.id)
+            }
+        }
         val appLanguage = QuestionLanguage.normalize(
             users.findById(principal.userId)?.appLanguage?.databaseValue,
         )
@@ -252,7 +286,7 @@ class StudyService(
             answerTranslationPending = projected.answerTranslationPending,
             aiResponseTranslationPending = projected.aiResponseTranslationPending,
             answerAuthorOriginal = projected.answerAuthorOriginal,
-        )
+        ).forQuestionContract(clientContract.currentVersion())
     }
 
     private suspend fun project(
@@ -304,6 +338,7 @@ class StudyService(
                 question.topic = localized.fields["topic"] ?: question.topic
                 question.question = localized.fields["question"] ?: question.question
                 question.hint = localized.fields["hint"] ?: question.hint
+                question.choiceOptionsJson = localized.fields["choiceOptionsJson"] ?: question.choiceOptionsJson
                 questionDisplay = target
             }
         }

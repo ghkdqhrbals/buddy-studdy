@@ -1244,6 +1244,7 @@ struct StudyCategory: Codable, Equatable, Identifiable {
     var difficulty: Difficulty
     var customPrompt: String
     var openAIModel: String
+    var questionFormatPreference: QuestionFormatPreference
     var createdAt: Date
 
     init(
@@ -1252,6 +1253,7 @@ struct StudyCategory: Codable, Equatable, Identifiable {
         difficulty: Difficulty = .beginner,
         customPrompt: String = StudySettings.defaultCustomPrompt,
         openAIModel: String = StudySettings.defaultOpenAIModel,
+        questionFormatPreference: QuestionFormatPreference = .mixed,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -1259,6 +1261,7 @@ struct StudyCategory: Codable, Equatable, Identifiable {
         self.difficulty = difficulty
         self.customPrompt = customPrompt
         self.openAIModel = openAIModel
+        self.questionFormatPreference = questionFormatPreference
         self.createdAt = createdAt
     }
 
@@ -1268,6 +1271,7 @@ struct StudyCategory: Codable, Equatable, Identifiable {
         case difficulty
         case customPrompt
         case openAIModel
+        case questionFormatPreference
         case createdAt
     }
 
@@ -1278,6 +1282,7 @@ struct StudyCategory: Codable, Equatable, Identifiable {
         difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? .beginner
         customPrompt = try container.decodeIfPresent(String.self, forKey: .customPrompt) ?? StudySettings.defaultCustomPrompt
         openAIModel = try container.decodeIfPresent(String.self, forKey: .openAIModel) ?? StudySettings.defaultOpenAIModel
+        questionFormatPreference = try container.decodeIfPresent(QuestionFormatPreference.self, forKey: .questionFormatPreference) ?? .mixed
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 
@@ -1568,6 +1573,7 @@ struct StudySettings: Codable, Equatable {
                     difficulty: category.difficulty,
                     customPrompt: category.normalizedCustomPrompt,
                     openAIModel: category.sanitizedOpenAIModel,
+                    questionFormatPreference: category.questionFormatPreference,
                     createdAt: category.createdAt
                 )
             )
@@ -1866,10 +1872,113 @@ struct OpenAIUsage: Codable, Equatable {
     var totalTokens: Int
 }
 
+enum QuestionFormat: String, Codable, Equatable {
+    case freeText = "FREE_TEXT"
+    case multipleChoice = "MULTIPLE_CHOICE"
+}
+
+enum QuestionFormatPreference: String, Codable, CaseIterable, Equatable {
+    case freeText = "FREE_TEXT"
+    case multipleChoice = "MULTIPLE_CHOICE"
+    case mixed = "MIXED"
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .freeText: strings.freeTextQuestion
+        case .multipleChoice: strings.multipleChoiceQuestion
+        case .mixed: strings.mixedQuestionFormats
+        }
+    }
+}
+
+struct MultipleChoiceOption: Codable, Equatable, Identifiable {
+    var id: String
+    var text: String
+    var count: Int? = nil
+    var percentage: Double? = nil
+}
+
+struct MultipleChoiceQuestion: Codable, Equatable {
+    var options: [MultipleChoiceOption]
+    var selectedOptionId: String? = nil
+    var totalParticipants: Int? = nil
+    var correctOptionId: String? = nil
+    var isCorrect: Bool? = nil
+    var explanation: String? = nil
+
+    var hasAnswered: Bool { selectedOptionId != nil }
+
+    func applyingParticipation(_ result: MultipleChoiceQuestion) -> MultipleChoiceQuestion {
+        var merged = self
+        let resultsByID = result.options.reduce(into: [String: MultipleChoiceOption]()) { $0[$1.id] = $1 }
+        merged.options = options.map { option in
+            var displayed = option
+            displayed.count = resultsByID[option.id]?.count
+            displayed.percentage = resultsByID[option.id]?.percentage
+            return displayed
+        }
+        merged.selectedOptionId = result.selectedOptionId
+        merged.totalParticipants = result.totalParticipants
+        merged.correctOptionId = result.correctOptionId
+        merged.isCorrect = result.isCorrect
+        merged.explanation = result.explanation
+        return merged
+    }
+
+    var hasValidOptions: Bool {
+        (2...4).contains(options.count) && Set(options.map(\.id)).count == options.count &&
+            options.allSatisfy { !$0.id.isEmpty && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+}
+
+struct StudyAnswerDraft: Codable, Equatable {
+    var text: String = ""
+    var selectedOptionId: String? = nil
+
+    init(text: String = "", selectedOptionId: String? = nil) {
+        self.text = text
+        self.selectedOptionId = selectedOptionId
+    }
+
+    private enum CodingKeys: String, CodingKey { case text, selectedOptionId }
+
+    init(from decoder: Decoder) throws {
+        if let legacy = try? decoder.singleValueContainer().decode(String.self) {
+            text = legacy
+            selectedOptionId = nil
+        } else {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+            selectedOptionId = try container.decodeIfPresent(String.self, forKey: .selectedOptionId)
+        }
+    }
+}
+
 struct QuestionItem: Codable, Equatable {
     var question: String
     var expectedAnswerHint: String?
     var createdAt: Date
+    var questionFormat: QuestionFormat = .freeText
+    var multipleChoice: MultipleChoiceQuestion? = nil
+
+    init(question: String, expectedAnswerHint: String? = nil, createdAt: Date, questionFormat: QuestionFormat = .freeText, multipleChoice: MultipleChoiceQuestion? = nil) {
+        self.question = question
+        self.expectedAnswerHint = expectedAnswerHint
+        self.createdAt = createdAt
+        self.questionFormat = questionFormat
+        self.multipleChoice = multipleChoice
+    }
+
+    private enum CodingKeys: String, CodingKey { case question, expectedAnswerHint, createdAt, questionFormat, multipleChoice }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        question = try container.decode(String.self, forKey: .question)
+        expectedAnswerHint = try container.decodeIfPresent(String.self, forKey: .expectedAnswerHint)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        questionFormat = try container.decodeIfPresent(QuestionFormat.self, forKey: .questionFormat) ?? .freeText
+        multipleChoice = try container.decodeIfPresent(MultipleChoiceQuestion.self, forKey: .multipleChoice)
+    }
 }
 
 struct GradingResult: Codable, Equatable {
@@ -2112,6 +2221,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
 
     private enum BackendBooleanCodingKeys: String, CodingKey {
         case publicValue = "public"
+        case questionFormat
+        case multipleChoice
     }
 
     init(
@@ -2182,6 +2293,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         voiceRecord = try container.decodeIfPresent(VoiceRecordContent.self, forKey: .voiceRecord)
         studyID = try container.decodeIfPresent(Int.self, forKey: .studyID)
         question = try container.decode(QuestionItem.self, forKey: .question)
+        if let format = try backendBooleanContainer.decodeIfPresent(QuestionFormat.self, forKey: .questionFormat) { question.questionFormat = format }
+        if let choices = try backendBooleanContainer.decodeIfPresent(MultipleChoiceQuestion.self, forKey: .multipleChoice) { question.multipleChoice = choices }
         answer = try container.decodeIfPresent(String.self, forKey: .answer)
         gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
         topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
@@ -2255,7 +2368,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
             localization: localization,
             recordType: recordType,
             voiceRecord: voiceRecord,
-            timeDisplay: timeDisplay
+            timeDisplay: timeDisplay,
+            questionFormat: question.questionFormat,
+            multipleChoice: question.multipleChoice
         )
     }
 }
@@ -3039,6 +3154,26 @@ struct AppStrings {
     }
 
     var viewLearningThread: String { text("학습 대화 이어보기", "Continue learning thread", "学習の会話を続ける") }
+    var questionFormat: String { text("질문 형식", "Question format", "問題の形式") }
+    var freeTextQuestion: String { text("주관식", "Written answer", "記述式") }
+    var multipleChoiceQuestion: String { text("객관식", "Multiple choice", "選択式") }
+    var mixedQuestionFormats: String { text("혼합", "Mixed", "ミックス") }
+    var questionFormatHelp: String { text("예약·새 질문에 적용됩니다. 혼합은 두 형식을 같은 확률로 생성합니다.", "Applies to scheduled and new questions. Mixed gives both formats an equal chance.", "定期配信と新しい問題に適用されます。ミックスは両方の形式を同じ確率で生成します。") }
+    var chooseAnswer: String { text("선택하면 답변이 제출됩니다. 제출 후 변경할 수 없습니다.", "Tap an option to submit. Your answer cannot be changed.", "選択すると回答を送信します。送信後は変更できません。") }
+    var selectedAnswer: String { text("내 선택", "Your choice", "自分の回答") }
+    var correctAnswer: String { text("정답", "Correct answer", "正解") }
+    var choiceUnavailable: String { text("선택지를 불러오지 못했습니다. 다시 시도하세요.", "Could not load the options. Please retry.", "選択肢を読み込めませんでした。もう一度お試しください。") }
+    var choiceSubmissionFailed: String { text("답변을 확인하지 못했습니다. 같은 선택으로 다시 시도하세요.", "Could not confirm your answer. Retry the same choice.", "回答を確認できませんでした。同じ選択肢で再試行してください。") }
+    var signInToChoose: String { text("로그인하고 답변하기", "Sign in to answer", "ログインして回答する") }
+    func quizParticipants(_ count: Int) -> String {
+        if count == 1 { return text("1명 참여", "1 participant", "1人が回答") }
+        return text("\(count)명 참여", "\(count) participants", "\(count)人が回答")
+    }
+    func quizOptionCount(_ count: Int) -> String {
+        if count == 1 { return text("1명", "1 person", "1人") }
+        return text("\(count)명", "\(count) people", "\(count)人")
+    }
+
     var followUpQuestion: String { text("꼬리질문 받기", "Get a follow-up", "追加問題を受け取る") }
     var customQuestionTag: String { text("사용자 생성 질문", "Custom question", "ユーザー作成の問題") }
     var createCustomQuestion: String { text("직접 질문 만들기", "Write your own question", "自分で問題を作る") }

@@ -1,6 +1,8 @@
 package com.buddystudy.backend.community.application.service
 
 import com.buddystudy.common.domain.SupportedLanguage
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort
+import com.buddystudy.backend.common.application.port.outbound.LegacyClientQuestionContract
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -67,6 +69,10 @@ import com.buddystudy.backend.community.application.model.toResponse
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.service.VoiceRecordContentProjector
+import com.buddystudy.backend.study.application.port.outbound.QuestionChoiceResponsePort
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
+import com.buddystudy.backend.study.application.model.multipleChoiceResponse
+import com.buddystudy.study.domain.entity.QuestionFormat
 import com.buddystudy.backend.community.application.port.outbound.NativeAdEligibilityPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
@@ -113,6 +119,9 @@ class CommunityService(
     private val afterCommit: AfterCommitPort,
     private val outboxPublisher: PublishOutboxUseCase,
     private val voiceRecordProjector: VoiceRecordContentProjector = VoiceRecordContentProjector(UnavailableVoiceStudyLearningLocalizationPort),
+    private val choiceResponses: QuestionChoiceResponsePort,
+    private val choiceCodec: QuestionChoiceCodec,
+    private val clientQuestionContract: ClientQuestionContractPort = LegacyClientQuestionContract,
 ) : CommunityUseCase {
     @Transactional
     override suspend fun getPublicQuestions(
@@ -579,6 +588,38 @@ class CommunityService(
     }
 
     @Transactional
+    override suspend fun votePublicQuestion(
+        principal: Principal,
+        id: Long,
+        selectedOptionId: String,
+        language: String,
+        view: String,
+    ): CommunityQuestionResponse {
+        if (clientQuestionContract.currentVersion() < 3) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Question not found.")
+        }
+        if (principal.anonymous || principal.status != "ACTIVE") {
+            throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.ACCOUNT_FORBIDDEN, "Sign in to answer this question.")
+        }
+        // Serialize participation with owner submission, publicity updates and deletion.
+        val question = questions.lockPublicAnsweredById(id)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Question not found.")
+        if (question.userId?.let { userBlocks.exists(principal.userId, it) } == true) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Question not found.")
+        }
+        if (question.questionFormat != QuestionFormat.MULTIPLE_CHOICE ||
+            choiceCodec.decode(question.choiceOptionsJson).none { it.id == selectedOptionId }
+        ) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Select an available question option.")
+        }
+        val canonical = choiceResponses.insertOrRead(id, principal.userId, selectedOptionId, Instant.now())
+        if (canonical != selectedOptionId) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.ANSWER_ALREADY_SUBMITTED, "The submitted selection cannot be changed.")
+        }
+        return community(question, communityContext(listOf(question), principal), language, translationViewMode(view))
+    }
+
+    @Transactional
     override suspend fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
         val question = publicAnsweredQuestion(id)
         var changed = false
@@ -791,11 +832,15 @@ class CommunityService(
         if (questions.isEmpty()) return CommunityContext()
         val userIds = questions.mapNotNull { it.userId }.distinct()
         val questionIds = questions.map { it.id }
+        val choiceQuestionIds = questions.filter { it.questionFormat == QuestionFormat.MULTIPLE_CHOICE }.map { it.id }
+        val selections = principal?.let { choiceResponses.findSelections(choiceQuestionIds, it.userId) }.orEmpty()
         return CommunityContext(
             authorsById = users.findAllById(userIds).associateBy { it.id },
             statsByQuestionId = questionStats.findAllByIds(questionIds).associateBy { it.questionId },
             likedQuestionIds = principal?.let { likes.findLikedQuestionIds(it.userId, questionIds) }.orEmpty(),
             viewerUserId = principal?.userId,
+            selectionsByQuestionId = selections,
+            choiceCountsByQuestionId = choiceResponses.countByOptions(selections.keys.toList()),
         )
     }
 
@@ -834,7 +879,7 @@ class CommunityService(
         val author = displayQuestion.userId?.let { context.authorsById[it]?.toAuthorProjection() }
         val stats = context.statsByQuestionId[displayQuestion.id]
         val liked = displayQuestion.id in context.likedQuestionIds
-        return PublicQuestion.of(displayQuestion.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked)
+        val response = PublicQuestion.of(displayQuestion.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked)
             .toProjection()
             .toCommunityQuestionResponse(
                 requestedLanguage = QuestionLanguage.normalize(requestedLanguage),
@@ -848,6 +893,23 @@ class CommunityService(
                 answerAuthorOriginal = projected.answerAuthorOriginal,
                 isOwnedByMe = context.viewerUserId != null && q.userId == context.viewerUserId,
             )
+        if (q.questionFormat != QuestionFormat.MULTIPLE_CHOICE) return response
+        val selectedOptionId = context.selectionsByQuestionId[q.id]
+        return response.copy(
+            questionFormat = q.questionFormat,
+            multipleChoice = multipleChoiceResponse(
+                options = choiceCodec.decode(displayQuestion.choiceOptionsJson),
+                selectedOptionId = selectedOptionId,
+                correctOptionId = q.correctOptionId,
+                explanation = response.gradingResult?.explanation ?: q.choiceExplanation,
+                counts = context.choiceCountsByQuestionId[q.id].orEmpty(),
+            ),
+            answer = response.answer.takeIf { selectedOptionId != null },
+            gradingResult = response.gradingResult.takeIf { selectedOptionId != null },
+            localization = response.localization?.let {
+                if (selectedOptionId != null) it else it.copy(answer = null, aiResponse = null)
+            },
+        )
     }
 
     private suspend fun localizedRecord(
@@ -898,6 +960,7 @@ class CommunityService(
                 question.topic = questionReady.fields["topic"] ?: question.topic
                 question.question = questionReady.fields["question"] ?: question.question
                 question.hint = questionReady.fields["hint"] ?: question.hint
+                question.choiceOptionsJson = questionReady.fields["choiceOptionsJson"] ?: question.choiceOptionsJson
                 questionDisplay = target
             }
         }
@@ -954,13 +1017,17 @@ class CommunityService(
     private fun TextLocalizationSnapshot?.readyFor(sourceHash: String?) =
         sourceHash?.let { hash -> this?.takeIf { it.status == "READY" && it.sourceHash == hash } }
 
-    private suspend fun publicAnsweredQuestion(id: Long, language: String? = null): QuestionEntity =
-        (if (language == null) {
+    private suspend fun publicAnsweredQuestion(id: Long, language: String? = null): QuestionEntity {
+        val question = (if (language == null) {
             questions.findPublicAnsweredById(id)
         } else {
             questions.findPublicAnsweredByIdAndLanguage(id, language)
-        })
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        }) ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        if (question.questionFormat == QuestionFormat.MULTIPLE_CHOICE && clientQuestionContract.currentVersion() < 3) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        }
+        return question
+    }
 
     private suspend fun incrementLikeCount(questionId: Long, delta: Int): Int {
         val now = Instant.now()
@@ -1064,6 +1131,8 @@ private data class CommunityContext(
     val statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
     val likedQuestionIds: Set<Long> = emptySet(),
     val viewerUserId: Long? = null,
+    val selectionsByQuestionId: Map<Long, String> = emptyMap(),
+    val choiceCountsByQuestionId: Map<Long, Map<String, Int>> = emptyMap(),
 )
 
 private suspend fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(

@@ -71,6 +71,9 @@ struct SettingsStoreLocalStudyRecordRepository: LocalStudyRecordRepository {
         settingsStore.saveAnswerDraft(answer, recordID: recordID)
     }
 
+    func loadChoiceDraft(recordID: String) -> String? { settingsStore.loadChoiceDraft(recordID: recordID) }
+    func saveChoiceDraft(_ optionID: String, recordID: String) { settingsStore.saveChoiceDraft(optionID, recordID: recordID) }
+
     func deleteAnswerDraft(recordID: String) {
         settingsStore.deleteAnswerDraft(recordID: recordID)
     }

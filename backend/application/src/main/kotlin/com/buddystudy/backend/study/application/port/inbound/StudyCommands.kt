@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.application.port.inbound
+import com.buddystudy.study.domain.entity.QuestionFormatPreference
 
 data class CreateStudyCommand(
     val topic: String,
@@ -9,6 +10,7 @@ data class CreateStudyCommand(
     val customPrompt: String = "",
     val openaiModel: String = "gpt-5.4",
     val maxHistoryCount: Int = 100,
+    val questionFormatPreference: QuestionFormatPreference? = null,
 )
 
 /** Create-only root metadata. Scheduling uses the product defaults and is not model-controlled. */

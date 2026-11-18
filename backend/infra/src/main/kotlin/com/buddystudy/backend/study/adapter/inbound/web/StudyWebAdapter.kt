@@ -95,12 +95,10 @@ class StudyWebAdapter(
 
     override suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication) =
         ResponseEntity.accepted().body(
-            studyUseCase.answer(
-                authentication.principalOrThrow(),
-                id,
-                body.answer,
-                body.sourceLanguage,
-                grade = true,
+            if (body.selectedOptionId != null) studyUseCase.answerChoice(
+                authentication.principalOrThrow(), id, body.selectedOptionId!!,
+            ) else studyUseCase.answer(
+                authentication.principalOrThrow(), id, body.answer, body.sourceLanguage, grade = true,
             ),
         )
 
@@ -160,6 +158,7 @@ class StudyWebAdapter(
                 customPrompt = QuestionPromptDefaults.resolve(body.customPrompt),
                 openaiModel = body.openaiModel,
                 maxHistoryCount = body.maxHistoryCount,
+                questionFormatPreference = body.questionFormatPreference,
             ),
         )
 

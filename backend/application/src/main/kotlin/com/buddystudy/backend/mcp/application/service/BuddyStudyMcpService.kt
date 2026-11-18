@@ -209,13 +209,17 @@ class BuddyStudyMcpService(
         recordId: Long,
         answer: String,
         sourceLanguage: String?,
-    ) = studyAnswers.answer(
-        principal = registered(principal),
-        recordId = positiveId(recordId, "record_id"),
-        answer = validatedAnswer(answer),
-        sourceLanguage = sourceLanguage,
-        grade = true,
-    )
+        selectedOptionId: String?,
+    ): com.buddystudy.backend.study.application.model.StudyRecordResponse {
+        val member = registered(principal)
+        val id = positiveId(recordId, "record_id")
+        return if (selectedOptionId != null) {
+            if (answer.isNotBlank()) throw validation("Provide answer or selected_option_id, not both.")
+            studyAnswers.answerChoice(member, id, requiredText(selectedOptionId, "selected_option_id"))
+        } else {
+            studyAnswers.answer(member, id, validatedAnswer(answer), sourceLanguage, grade = true)
+        }
+    }
 
     @RequirePermission(Permissions.RECORD_UPDATE)
     override suspend fun getGradingProcess(

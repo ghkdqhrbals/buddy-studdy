@@ -22,6 +22,7 @@ class StudyEntity(
     var notificationSound: String? = null,
     var customPrompt: String = "",
     var openaiModel: String = "gpt-5.4",
+    var questionFormatPreference: QuestionFormatPreference = QuestionFormatPreference.MIXED,
     var maxHistoryCount: Int = 100,
     var nextDueAt: Instant? = null,
     var scheduleClaimedUntil: Instant? = null,

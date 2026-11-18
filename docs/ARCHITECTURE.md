@@ -219,6 +219,14 @@ runtime comparison or rollback does not fork application behavior.
 
 ## Follow-up Learning
 
+Objective questions extend the existing generation Saga and owner grading
+lifecycle with a persisted format and immutable option identities. Owner and
+community choices share a unique per-question/account response store; public
+summaries are batch reads rather than reaction-stream counters. Server projections
+gate results until participation. See
+[Multiple-choice questions](MULTIPLE_CHOICE_QUESTIONS.md) for contracts,
+localization, compatibility, and staged activation.
+
 iOS 1.3.0 extends owned graded records with bounded follow-up threads and
 private learner-authored question-and-answer records. Follow-up questions retain
 parent/root identity and use the existing backend generation Saga, quota

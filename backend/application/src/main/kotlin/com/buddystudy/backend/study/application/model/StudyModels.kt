@@ -1,4 +1,6 @@
 package com.buddystudy.backend.study.application.model
+import com.buddystudy.study.domain.entity.QuestionFormatPreference
+import com.buddystudy.study.domain.entity.QuestionFormat
 
 import com.buddystudy.backend.common.application.model.PageResponse
 import com.buddystudy.backend.common.application.model.RecordTimeDisplay
@@ -61,6 +63,8 @@ data class StudyRecordResponse(
     val voiceRecord: VoiceRecordContentResponse? = null,
     @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val timeDisplay: RecordTimeDisplay? = null,
+    val questionFormat: QuestionFormat = QuestionFormat.FREE_TEXT,
+    val multipleChoice: MultipleChoiceResponse? = null,
 )
 
 data class RecordsPageResponse(
@@ -91,6 +95,7 @@ data class StudyRoomResponse(
     val createdAt: Instant,
     val updatedAt: Instant,
     val curriculumTerminal: Boolean = false,
+    val questionFormatPreference: QuestionFormatPreference = QuestionFormatPreference.MIXED,
 )
 
 /**

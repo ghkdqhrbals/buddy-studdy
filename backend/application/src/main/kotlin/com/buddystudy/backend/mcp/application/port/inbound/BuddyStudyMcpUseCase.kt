@@ -101,6 +101,7 @@ interface BuddyStudyMcpUseCase {
         recordId: Long,
         answer: String,
         sourceLanguage: String?,
+        selectedOptionId: String? = null,
     ): StudyRecordResponse
 
     suspend fun getGradingProcess(

@@ -187,6 +187,16 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `registration omission resets an upgraded installation to legacy question contract`() = runBlocking<Unit> {
+        val installation = "question-contract-installation-stable-32"
+        val upgraded = login.register(RegisterDeviceCommand(installationId = installation, questionApiVersion = 3))
+        assertThat(devices.findByDeviceId(upgraded.deviceId)?.questionApiVersion).isEqualTo(3)
+        val legacy = login.register(RegisterDeviceCommand(installationId = installation))
+        assertThat(legacy.deviceId).isEqualTo(upgraded.deviceId)
+        assertThat(devices.findByDeviceId(legacy.deviceId)?.questionApiVersion).isEqualTo(1)
+    }
+
+    @Test
     fun `push token update reuses principal user status`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         users.findByIdCalls = 0

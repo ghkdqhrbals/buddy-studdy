@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.application.port.outbound
+import com.buddystudy.backend.study.application.model.QuestionChoiceOption
 
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.model.GradingPromptPreviewCommand
@@ -43,7 +44,20 @@ data class GeneratedQuestion(
     val question: String,
     val hint: String?,
     val rubric: AiGradingRubric? = null,
-)
+    val options: List<QuestionChoiceOption> = emptyList(),
+    val correctOptionId: String? = null,
+    val explanation: String? = null,
+) {
+    fun validateMultipleChoice() {
+        require(question.isNotBlank()) { "Multiple-choice question is blank." }
+        require(options.size in 2..4) { "Multiple-choice questions require two to four options." }
+        require(options.all { it.id.matches(Regex("[A-Za-z0-9_-]{1,64}")) && it.text.isNotBlank() }) { "Invalid multiple-choice option." }
+        require(options.map { it.id }.distinct().size == options.size) { "Multiple-choice option IDs must be unique." }
+        require(options.map { it.text.trim().lowercase() }.distinct().size == options.size) { "Multiple-choice options must be distinct." }
+        require(options.count { it.id == correctOptionId } == 1) { "Multiple-choice question requires one valid answer key." }
+        require(!explanation.isNullOrBlank()) { "Multiple-choice answer explanation is blank." }
+    }
+}
 
 data class GradedAnswer(
     val score: Int,

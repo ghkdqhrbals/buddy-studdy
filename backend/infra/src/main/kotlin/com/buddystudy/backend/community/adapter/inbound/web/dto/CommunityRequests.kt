@@ -20,3 +20,9 @@ data class SubmitFeedbackRequest(
     @field:Size(min = 2, max = 1_000)
     var content: String = "",
 )
+
+data class PublicQuestionVoteRequest(
+    @field:NotBlank
+    @field:Size(max = 64)
+    var selectedOptionId: String = "",
+)

@@ -104,6 +104,39 @@ class AnswerGradingServiceTest {
         verifyNoInteractions(studies, openAI, writer)
     }
 
+    @Test
+    fun `multiple choice grades deterministically without any configured OpenAI key`() = runBlocking<Unit> {
+        for (selected in listOf("A", "B")) {
+            val event = AnswerGradingRequestedEvent("mc-event-$selected", "mc-request-$selected", 10, 7, Instant.now())
+            val questions = mock(QuestionPort::class.java)
+            val studies = mock(StudyPort::class.java)
+            val openAI = mock(OpenAIPort::class.java)
+            var completed: com.buddystudy.backend.study.application.port.outbound.GradedAnswer? = null
+            val writer = object : AnswerGradingWriteUseCase {
+                override suspend fun queue(userId: Long, recordId: Long, answer: String, sourceLanguage: String, aiResponseLanguage: String, now: Instant) = error("Not expected")
+                override suspend fun transition(event: AnswerGradingRequestedEvent, status: AnswerGradingStatus, now: Instant) = error("Not expected")
+                override suspend fun fail(event: AnswerGradingRequestedEvent, errorMessage: String, now: Instant) = error("Deterministic grading must succeed: $errorMessage")
+                override suspend fun complete(event: AnswerGradingRequestedEvent, grade: com.buddystudy.backend.study.application.port.outbound.GradedAnswer, now: Instant): com.buddystudy.backend.study.application.port.inbound.CompletedAnswerGrading {
+                    completed = grade
+                    return com.buddystudy.backend.study.application.port.inbound.CompletedAnswerGrading(true)
+                }
+            }
+            `when`(questions.findByIdAndUserIdAndDeletedAtIsNull(10, 7)).thenReturn(QuestionEntity(
+                id = 10, userId = 7, questionFormat = com.buddystudy.study.domain.entity.QuestionFormat.MULTIPLE_CHOICE,
+                answer = "Selected answer", selectedOptionId = selected, correctOptionId = "A", choiceExplanation = "Generated explanation.",
+                gradingRequestId = event.requestId, gradingStatus = AnswerGradingStatus.QUEUED,
+            ))
+            val properties = BuddyStudyProperties()
+            AnswerGradingService(properties, questions, studies, UserContentOpenAIKeyProvider(properties), openAI,
+                writer, RecordingInbox(), mock(PublishOutboxUseCase::class.java)).process(event, "study.answer.grade.v1")
+            assertThat(completed?.score).isEqualTo(if (selected == "A") 100 else 0)
+            assertThat(completed?.isCorrect).isEqualTo(selected == "A")
+            assertThat(completed?.explanation).isEqualTo("Generated explanation.")
+            assertThat(completed?.policyVersion).isEqualTo("multiple-choice-v1")
+            verifyNoInteractions(openAI)
+        }
+    }
+
     private class RecordingInbox : StreamInboxPort {
         var claimedStreamKey: String? = null
         var succeeded: StreamInboxClaim? = null

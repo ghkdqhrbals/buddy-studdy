@@ -89,6 +89,8 @@ class StudyServiceTest {
         notificationOutbox,
         PassthroughLanguageDetector(),
         ContentTranslationRequestManager(EmptyContentLocalizationPort(), translationEvents),
+        org.mockito.Mockito.mock(com.buddystudy.backend.study.application.port.outbound.QuestionChoiceResponsePort::class.java),
+        com.buddystudy.backend.study.application.model.QuestionChoiceCodec(),
     )
     private val service = StudyService(
         questions = questions,

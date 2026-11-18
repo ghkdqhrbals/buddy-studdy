@@ -18,4 +18,5 @@ data class StudySettingsResponse(
     val openaiKeyConfigured: Boolean = false,
     val nextDueAt: Instant? = null,
     val lastError: String? = null,
+    val questionFormatPreference: com.buddystudy.study.domain.entity.QuestionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.MIXED,
 )

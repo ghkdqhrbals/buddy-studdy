@@ -87,6 +87,10 @@ struct RemoteRecordsRepository: RecordsRepository {
         )
     }
 
+    func submitChoice(registration: RemotePushRegistration, recordID: String, selectedOptionId: String, sourceLanguage: String) async throws -> StudyRecord {
+        try await backendClient.submitRecordChoice(registration: registration, recordID: recordID, selectedOptionId: selectedOptionId, sourceLanguage: sourceLanguage)
+    }
+
     func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
         correlationID: String,

@@ -9,6 +9,7 @@ data class RegisterDeviceCommand(
     val timezone: String = "Asia/Seoul",
     val appVersion: String? = null,
     val appBuild: String? = null,
+    val questionApiVersion: Int = 1,
 )
 
 data class EmailLoginCommand(

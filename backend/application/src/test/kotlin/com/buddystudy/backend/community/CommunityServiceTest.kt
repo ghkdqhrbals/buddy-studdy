@@ -1,6 +1,11 @@
 package com.buddystudy.backend.community
 
+import com.buddystudy.backend.common.application.port.outbound.ClientQuestionContractPort
 import kotlinx.coroutines.runBlocking
+import com.buddystudy.backend.study.application.model.QuestionChoiceCodec
+import com.buddystudy.backend.study.application.model.QuestionChoiceOption
+import com.buddystudy.backend.study.application.port.outbound.QuestionChoiceResponsePort
+import com.buddystudy.study.domain.entity.QuestionFormat
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.common.domain.SupportedLanguage
@@ -94,6 +99,10 @@ class CommunityServiceTest {
     private val voiceLocalizations = FakeVoiceLocalizations()
     private val ordinaryLocalizations = RecordingOrdinaryLocalizations()
     private val ordinaryRequests = RecordingLocalizationRequests()
+    private var contractVersion = 3
+    private val contract = object : ClientQuestionContractPort { override suspend fun currentVersion() = contractVersion }
+    private val choiceResponses = FakeChoiceResponses()
+    private val choiceCodec = QuestionChoiceCodec()
     private val service = CommunityService(
         users = users,
         questions = questions,
@@ -118,6 +127,9 @@ class CommunityServiceTest {
         ),
         afterCommit = ImmediateAfterCommit(),
         outboxPublisher = translationPublisher,
+        choiceResponses = choiceResponses,
+        choiceCodec = choiceCodec,
+        clientQuestionContract = contract,
         voiceRecordProjector = VoiceRecordContentProjector(voiceLocalizations),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
@@ -541,6 +553,9 @@ class CommunityServiceTest {
             ),
             afterCommit = ImmediateAfterCommit(),
             outboxPublisher = translationPublisher,
+        choiceResponses = choiceResponses,
+        choiceCodec = choiceCodec,
+        clientQuestionContract = contract,
         )
 
         val response = localizedService.getPublicQuestion(
@@ -918,6 +933,125 @@ class CommunityServiceTest {
         sourceHash = "voice-source-hash-${question.id}",
         recordId = question.id,
     )
+
+    @Test
+    fun `legacy public detail and vote do not expose objective questions`(): Unit = runBlocking {
+        questions.rows += choiceQuestion()
+        contractVersion = 1
+        assertThatThrownBy { runBlocking { service.getPublicQuestion(principal, 100) } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        assertThatThrownBy { runBlocking { service.votePublicQuestion(principal, 100, "a") } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        assertThat(choiceResponses.rows).isEmpty()
+    }
+
+    @Test
+    fun `multiple choice hides answer and all results from anonymous and unselected viewers`(): Unit = runBlocking {
+        questions.rows += choiceQuestion()
+        likes.rows += QuestionLikeEntity(questionId = 100, userId = principal.userId)
+        choiceResponses.insertOrRead(100, 10, "a", Instant.now())
+        val responses = listOf(
+            service.getPublicQuestion(null, 100),
+            service.getPublicQuestion(principal, 100),
+            service.getPublicQuestionsV2(principal, null, "ko", limit = 20, offset = 0).questions.single(),
+            service.getLikedPublicQuestions(principal, null, "ko", limit = 20, offset = 0).questions.single(),
+        )
+        responses.forEach { response ->
+            assertThat(response.questionFormat).isEqualTo(QuestionFormat.MULTIPLE_CHOICE)
+            assertThat(response.answer).isNull()
+            assertThat(response.gradingResult).isNull()
+            assertThat(response.localization?.answer).isNull()
+            assertThat(response.localization?.aiResponse).isNull()
+            val choice = requireNotNull(response.multipleChoice)
+            assertThat(choice.options.map { it.id }).containsExactly("a", "b")
+            assertThat(choice.options).allMatch { it.count == null && it.percentage == null }
+            assertThat(choice.correctOptionId).isNull()
+            assertThat(choice.explanation).isNull()
+            assertThat(choice.isCorrect).isNull()
+            assertThat(choice.totalParticipants).isNull()
+        }
+    }
+
+    @Test
+    fun `public choice counts owner once and replay preserves the immutable participant selection`(): Unit = runBlocking {
+        val question = choiceQuestion()
+        questions.rows += question
+        choiceResponses.insertOrRead(100, 10, "a", Instant.now())
+        val originalAnswer = question.answer
+        val originalScore = question.score
+
+        val first = service.votePublicQuestion(principal, 100, "b")
+        val replay = service.votePublicQuestion(principal, 100, "b")
+        val choice = requireNotNull(replay.multipleChoice)
+        assertThat(choice.selectedOptionId).isEqualTo("b")
+        assertThat(choice.correctOptionId).isEqualTo("a")
+        assertThat(choice.isCorrect).isFalse()
+        assertThat(choice.explanation).isEqualTo("Because")
+        assertThat(choice.totalParticipants).isEqualTo(2)
+        assertThat(choice.options.map { it.count }).containsExactly(1, 1)
+        assertThat(choice.options.map { it.percentage }).containsExactly(50.0, 50.0)
+        assertThat(first.multipleChoice).isEqualTo(replay.multipleChoice)
+        assertThat(choiceResponses.rows).hasSize(2)
+        assertThat(questions.rows).containsExactly(question)
+        assertThat(question.answer).isEqualTo(originalAnswer)
+        assertThat(question.score).isEqualTo(originalScore)
+        assertThat(notificationPublisher.rows).isEmpty()
+        assertThat(reactionPublisher.events).isEmpty()
+        assertThat(translationEvents.events).isEmpty()
+
+        assertThatThrownBy { runBlocking { service.votePublicQuestion(principal, 100, "a") } }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code").isEqualTo(ApiErrorCode.ANSWER_ALREADY_SUBMITTED)
+        assertThat(choiceResponses.rows[100L to principal.userId]).isEqualTo("b")
+        val owner = service.getPublicQuestion(principal.copy(userId = 10), 100)
+        assertThat(owner.multipleChoice?.selectedOptionId).isEqualTo("a")
+        assertThat(owner.multipleChoice?.isCorrect).isTrue()
+    }
+
+    @Test
+    fun `public choice rejects invalid option inactive anonymous blocked private and deleted questions`(): Unit = runBlocking {
+        val question = choiceQuestion()
+        questions.rows += question
+        listOf(principal.copy(anonymous = true), principal.copy(status = "WITHDRAWN")).forEach { ineligible ->
+            assertThatThrownBy { runBlocking { service.votePublicQuestion(ineligible, 100, "a") } }
+                .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+        }
+        assertThatThrownBy { runBlocking { service.votePublicQuestion(principal, 100, "unknown") } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        userBlocks.rows += UserBlockEntity(blockerUserId = principal.userId, blockedUserId = 10)
+        assertThatThrownBy { runBlocking { service.votePublicQuestion(principal, 100, "a") } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        userBlocks.rows.clear()
+        question.publicQuestion = false
+        assertThatThrownBy { runBlocking { service.votePublicQuestion(principal, 100, "a") } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        question.publicQuestion = true
+        question.deletedAt = Instant.now()
+        assertThatThrownBy { runBlocking { service.votePublicQuestion(principal, 100, "a") } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        assertThat(choiceResponses.rows).isEmpty()
+    }
+
+    private fun choiceQuestion() = publicQuestion(100, 10, "Redis").apply {
+        questionFormat = QuestionFormat.MULTIPLE_CHOICE
+        choiceOptionsJson = choiceCodec.encode(listOf(QuestionChoiceOption("a", "AOF"), QuestionChoiceOption("b", "RDB")))
+        correctOptionId = "a"
+        selectedOptionId = "a"
+        choiceExplanation = "Because"
+    }
+
+    private class FakeChoiceResponses : QuestionChoiceResponsePort {
+        val rows = mutableMapOf<Pair<Long, Long>, String>()
+        override suspend fun insertOrRead(questionId: Long, userId: Long, optionId: String, now: Instant): String =
+            rows.getOrPut(questionId to userId) { optionId }
+        override suspend fun findSelections(questionIds: List<Long>, userId: Long) = rows
+            .filterKeys { it.first in questionIds && it.second == userId }.mapKeys { it.key.first }
+        override suspend fun countByOptions(questionIds: List<Long>) = rows.entries
+            .filter { it.key.first in questionIds }.groupBy({ it.key.first }, { it.value })
+            .mapValues { (_, options) -> options.groupingBy { it }.eachCount() }
+        override suspend fun deleteByQuestionId(questionId: Long) { rows.keys.removeIf { it.first == questionId } }
+        override suspend fun deleteByOwnerUserId(userId: Long) = Unit
+    }
 
     private fun publicQuestion(id: Long, userId: Long, topic: String) = QuestionEntity(
         id = id,

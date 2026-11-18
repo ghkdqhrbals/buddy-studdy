@@ -85,4 +85,28 @@ class BearerTokenFilterTest {
             .isEqualTo(principal.userId)
         assertThat(exchange.attributes.values).doesNotContain(accessToken)
     }
+
+    @Test
+    fun `authenticated requests observe upgrades and legacy downgrades with a partial device update`() = runBlocking<Unit> {
+        for ((savedVersion, header) in listOf(1 to "3", 3 to null)) {
+            val properties = BuddyStudyProperties().apply { auth.jwtSecret = "question-version-test" }
+            val provider = TokenProvider(properties)
+            val token = provider.create(7, "device-7", 71, false, "ACTIVE").first
+            val devices = Mockito.mock(DevicePort::class.java)
+            val sessions = Mockito.mock(UserDevicePort::class.java)
+            Mockito.`when`(devices.findByDeviceId("device-7")).thenReturn(DeviceEntity(deviceId = "device-7", userId = 7, questionApiVersion = savedVersion))
+            Mockito.`when`(sessions.findByIdAndUserId(71, 7)).thenReturn(UserDeviceEntity(id = 71, userId = 7, deviceId = "device-7"))
+            val expected = if (header == "3") 3 else 1
+            Mockito.`when`(devices.updateQuestionApiVersion("device-7", 7, expected)).thenReturn(1)
+            val filter = BearerTokenFilter(provider, devices, sessions, JsonMapperProvider.mapper,
+                ApiErrorResponseFactory(StaticMessageSource()), ApiLoggingPolicy("detailed"))
+            val request = MockServerHttpRequest.get("/api/v1/studies").header("Authorization", "Bearer $token")
+            header?.let { request.header("X-BuddyStudy-API-Version", it) }
+            filter.filter(MockServerWebExchange.from(request.build()), WebFilterChain { Mono.empty() }).block()
+            Mockito.verify(devices).updateQuestionApiVersion("device-7", 7, expected)
+            Mockito.verify(devices).findByDeviceId("device-7")
+            Mockito.verifyNoMoreInteractions(devices)
+        }
+    }
+
 }

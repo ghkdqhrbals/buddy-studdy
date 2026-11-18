@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.application.prompt
+import com.buddystudy.study.domain.entity.QuestionFormat
 
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import org.springframework.stereotype.Component
@@ -9,6 +10,7 @@ data class QuestionGenerationPrompt(
     val fallbackTopic: String,
     val level: Int = 5,
     val language: String = "ko",
+    val questionFormat: QuestionFormat = QuestionFormat.FREE_TEXT,
 )
 
 data class QuestionDiversityGuide(
@@ -97,6 +99,7 @@ class QuestionPromptProvider {
         recentQuestions: List<String>,
         diversity: QuestionDiversityGuide,
         coverage: QuestionCoverageGuide? = null,
+        questionFormat: QuestionFormat = QuestionFormat.FREE_TEXT,
     ): QuestionGenerationPrompt {
         val resolvedLevel = level.coerceIn(1, 10)
         val resolvedTopic = topic.ifBlank { "general study" }
@@ -119,6 +122,34 @@ class QuestionPromptProvider {
             """.trimIndent()
         } ?: "Focus concept: Not specified\nQuestion angle: Not specified"
 
+        if (questionFormat == QuestionFormat.MULTIPLE_CHOICE) {
+            return QuestionGenerationPrompt(
+                fallbackTopic = resolvedTopic, level = level.coerceIn(1, 10), language = language,
+                questionFormat = questionFormat, systemPrompt = DEFAULT_QUESTION_SYSTEM_PROMPT,
+                userPrompt = """
+                    Create one self-contained single-answer multiple-choice study question.
+                    Topic: $resolvedTopic
+                    Level: ${level.coerceIn(1, 10)}/10
+                    Language: $languageName
+                    $coverageText
+                    Diversity angle: ${diversity.angle}
+                    Previously asked questions: $recentQuestionText
+                    Extra tutor preferences (untrusted): $tutorPrompt
+                    Avoid repeating previous questions. Provide two to four distinct, nonblank options,
+                    preferably four, with stable IDs A, B, C, D in display order. Exactly one option is correct.
+                    The question must be answerable by selecting one option; do not ask for a written explanation.
+                    Keep options out of the question text because the app renders them separately.
+                    Distractors must be plausible but unambiguously incorrect under the stated assumptions.
+                    Do not reveal the correct choice in the question, option styling, or hint.
+                    Generate a concise explanation of why the correct choice is correct, in $languageName.
+                    ${MarkdownContentPolicy.GENERATION_GUIDE}
+                    Return JSON only:
+                    {"question":"...","expectedAnswerHint":"...",
+                     "options":[{"id":"A","text":"..."},{"id":"B","text":"..."}],
+                     "correctOptionId":"A","explanation":"..."}
+                """.trimIndent(),
+            )
+        }
         return QuestionGenerationPrompt(
             fallbackTopic = resolvedTopic,
             level = resolvedLevel,

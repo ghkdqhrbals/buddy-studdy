@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.application.model
+import com.buddystudy.study.domain.entity.QuestionFormat
 
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
@@ -50,6 +51,7 @@ data class QuestionGenerationSaga(
     val parentRecordId: Long? = null,
     val rootRecordId: Long? = null,
     val followUpDepth: Int = 0,
+    val questionFormat: QuestionFormat = QuestionFormat.FREE_TEXT,
 )
 
 data class QuestionGenerationRequestedEvent(

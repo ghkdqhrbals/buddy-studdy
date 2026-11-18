@@ -38,6 +38,20 @@ class SettingsServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
+    fun `root question preference persists omission preserves and child reads inherit`() = runBlocking<Unit> {
+        val root = StudyEntity(id = 11, userId = 7, topic = "Databases")
+        val child = StudyEntity(id = 12, userId = 7, parentStudyId = 11, topic = "Indexes")
+        studies.rows += listOf(root, child)
+        service.upsertStudySettings(principal, 11, ScheduleCommand(questionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE))
+        assertThat(root.questionFormatPreference).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
+        service.upsertStudySettings(principal, 11, ScheduleCommand())
+        assertThat(root.questionFormatPreference).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
+        service.upsertStudySettings(principal, 12, ScheduleCommand(questionFormatPreference = com.buddystudy.study.domain.entity.QuestionFormatPreference.FREE_TEXT))
+        assertThat(root.questionFormatPreference).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
+        assertThat(service.studySettings(principal, 12).questionFormatPreference).isEqualTo(com.buddystudy.study.domain.entity.QuestionFormatPreference.MULTIPLE_CHOICE)
+    }
+
+    @Test
     fun `upsert schedule updates only existing root studies in one query`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Kotlin")

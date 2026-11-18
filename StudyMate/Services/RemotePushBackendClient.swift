@@ -779,6 +779,10 @@ protocol RemotePushBackendClientProtocol {
         sourceLanguage: String
     ) async throws -> StudyRecord
 
+    func submitRecordChoice(registration: RemotePushRegistration, recordID: String, selectedOptionId: String, sourceLanguage: String) async throws -> StudyRecord
+
+    func votePublicQuestion(registration: RemotePushRegistration, questionID: String, selectedOptionId: String, language: AppLanguage) async throws -> CommunityQuestion
+
     func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
         correlationID: String,
@@ -1184,7 +1188,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             language: language.backendCode,
             timezone: timezone,
             appVersion: Self.currentAppVersion,
-            appBuild: Self.currentAppBuild
+            appBuild: Self.currentAppBuild,
+            questionApiVersion: 3
         )
         var request = URLRequest(url: endpoint("api", "v1", "devices", "register"))
         request.httpMethod = "POST"
@@ -1436,7 +1441,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             notificationSound: settings.notificationSound.backendSoundName,
             customPrompt: customPromptOverride(category.normalizedCustomPrompt),
             openAIModel: category.sanitizedOpenAIModel,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            questionFormatPreference: category.questionFormatPreference
         )
         var request = authenticatedRequest(
             registration: registration,
@@ -1528,7 +1534,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            schedules: []
+            schedules: [],
+            questionFormatPreference: category.questionFormatPreference
         )
         var request = authenticatedRequest(
             registration: registration,
@@ -3011,6 +3018,29 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(QuestionGenerationProcess.self, from: data)
     }
 
+    func submitRecordChoice(registration: RemotePushRegistration, recordID: String, selectedOptionId: String, sourceLanguage: String) async throws -> StudyRecord {
+        var request = authenticatedRequest(registration: registration, url: endpoint("api", "v1", "records", recordID, "answer"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(ChoiceAnswerRequest(selectedOptionId: selectedOptionId, sourceLanguage: sourceLanguage))
+        return try decoder.decode(StudyRecord.self, from: await perform(request))
+    }
+
+    func votePublicQuestion(registration: RemotePushRegistration, questionID: String, selectedOptionId: String, language: AppLanguage) async throws -> CommunityQuestion {
+        var components = URLComponents(url: endpoint("api", "v1", "public", "questions", questionID, "vote"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "tl", value: language.backendCode)]
+        var request = authenticatedRequest(registration: registration, url: components.url!)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(ChoiceAnswerRequest(selectedOptionId: selectedOptionId, sourceLanguage: nil))
+        return try decoder.decode(CommunityQuestion.self, from: await perform(request))
+    }
+
+    private struct ChoiceAnswerRequest: Encodable {
+        var selectedOptionId: String
+        var sourceLanguage: String?
+    }
+
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
@@ -3149,6 +3179,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         }
         #endif
         var request = request
+        if request.url?.host == baseURL.host, request.url?.path.hasPrefix("/api/") == true {
+            request.setValue("3", forHTTPHeaderField: "X-BuddyStudy-API-Version")
+        }
         let protectsLearningContent = Self.suppressesPrivateLearningBodies(for: request.url)
         let logsBodyContents = logsBodyContents && !protectsLearningContent
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -3346,7 +3379,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private static func isSafeSignedUploadHeader(_ name: String) -> Bool {
         switch name.lowercased() {
         case "authorization", "cookie", "host", "proxy-authorization", "x-device-id",
-             "x-client-secret":
+             "x-client-secret", "x-buddystudy-api-version":
             return false
         default:
             return true
@@ -3455,6 +3488,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var timezone: String
         var appVersion: String
         var appBuild: String
+        var questionApiVersion: Int
     }
 
     private struct AppUpdateCheckRequest: Encodable {
@@ -3517,6 +3551,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var openAIModel: String
         var maxHistoryCount: Int
         var schedules: [ScheduleItemRequest]
+        var questionFormatPreference: QuestionFormatPreference? = nil
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -3529,6 +3564,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case appLanguage
             case openAIModel = "openaiModel"
             case maxHistoryCount
+            case questionFormatPreference
             case schedules
         }
     }
@@ -3556,6 +3592,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var customPrompt: String?
         var openAIModel: String
         var maxHistoryCount: Int
+        var questionFormatPreference: QuestionFormatPreference
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -3565,6 +3602,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case notificationSound
             case customPrompt
             case openAIModel = "openaiModel"
+            case questionFormatPreference
             case maxHistoryCount
         }
 
@@ -3582,6 +3620,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             }
             try container.encode(openAIModel, forKey: .openAIModel)
             try container.encode(maxHistoryCount, forKey: .maxHistoryCount)
+            try container.encode(questionFormatPreference, forKey: .questionFormatPreference)
         }
     }
 
@@ -3779,6 +3818,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var activeForQuestions: Bool
     var notificationSound: String?
     var customPrompt: String
+    var questionFormatPreference: QuestionFormatPreference
     var openAIModel: String
     var maxHistoryCount: Int
     var nextDueAt: Date?
@@ -3801,6 +3841,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         notificationSound: String?,
         customPrompt: String,
         openAIModel: String,
+        questionFormatPreference: QuestionFormatPreference = .mixed,
         maxHistoryCount: Int,
         nextDueAt: Date?,
         lastSentAt: Date?,
@@ -3821,6 +3862,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         self.notificationSound = notificationSound
         self.customPrompt = customPrompt
         self.openAIModel = openAIModel
+        self.questionFormatPreference = questionFormatPreference
         self.maxHistoryCount = maxHistoryCount
         self.nextDueAt = nextDueAt
         self.lastSentAt = lastSentAt
@@ -3843,6 +3885,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case notificationSound
         case customPrompt
         case openAIModel = "openaiModel"
+        case questionFormatPreference
         case maxHistoryCount
         case nextDueAt
         case lastSentAt
@@ -3865,6 +3908,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         activeForQuestions = try container.decodeIfPresent(Bool.self, forKey: .activeForQuestions) ?? true
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound)
         customPrompt = try container.decode(String.self, forKey: .customPrompt)
+        questionFormatPreference = try container.decodeIfPresent(QuestionFormatPreference.self, forKey: .questionFormatPreference) ?? .mixed
         openAIModel = try container.decode(String.self, forKey: .openAIModel)
         maxHistoryCount = try container.decode(Int.self, forKey: .maxHistoryCount)
         nextDueAt = try container.decodeIfPresent(Date.self, forKey: .nextDueAt)
@@ -5065,6 +5109,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     // Set only by the transport that actually fetched a public question from production.
     // Never decoded from server content or synthesized for development/record fixtures.
     var publicShareURL: URL? = nil
+    // Local provenance only; never decoded from server JSON.
+    var viewerSessionGeneration: UInt64? = nil
     var id: String
     var recordType: StudyRecordType
     var voiceRecord: VoiceRecordContent?
@@ -5086,6 +5132,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var commentCount: Int
     var viewCount: Int
     var isLikedByMe: Bool
+    var questionFormat: QuestionFormat = .freeText
+    var multipleChoice: MultipleChoiceQuestion? = nil
     var localization: RecordLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
@@ -5109,6 +5157,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case viewCount
         case isLikedByMe
         case likedByMe
+        case questionFormat
+        case multipleChoice
         case localization
     }
 
@@ -5132,7 +5182,9 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         recordType: StudyRecordType = .question,
         voiceRecord: VoiceRecordContent? = nil,
         isOwnedByMe: Bool? = nil,
-        timeDisplay: StudyTimeDisplay? = nil
+        timeDisplay: StudyTimeDisplay? = nil,
+        questionFormat: QuestionFormat = .freeText,
+        multipleChoice: MultipleChoiceQuestion? = nil
     ) {
         self.id = id
         self.recordType = recordType
@@ -5154,6 +5206,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         self.viewCount = viewCount
         self.isLikedByMe = isLikedByMe
         self.localization = localization
+        self.questionFormat = questionFormat
+        self.multipleChoice = multipleChoice
     }
 
     init(from decoder: Decoder) throws {
@@ -5180,6 +5234,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe)
             ?? container.decodeIfPresent(Bool.self, forKey: .likedByMe)
             ?? false
+        questionFormat = try container.decodeIfPresent(QuestionFormat.self, forKey: .questionFormat) ?? .freeText
+        multipleChoice = try container.decodeIfPresent(MultipleChoiceQuestion.self, forKey: .multipleChoice)
         localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
         if recordType == .voiceTutor {
             guard voiceRecord != nil, status.caseInsensitiveCompare("completed") == .orderedSame,

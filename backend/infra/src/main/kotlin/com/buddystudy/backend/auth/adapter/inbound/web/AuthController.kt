@@ -184,6 +184,7 @@ private fun DeviceRegisterRequest.toCommand() = RegisterDeviceCommand(
     timezone = timezone,
     appVersion = appVersion,
     appBuild = appBuild,
+    questionApiVersion = questionApiVersion,
 )
 
 private fun EmailLoginRequest.toCommand() = EmailLoginCommand(

@@ -23,6 +23,7 @@ class DeviceEntity(
     var appVersion: String? = null,
     var appBuild: String? = null,
     var appVersionSeenAt: Instant? = null,
+    var questionApiVersion: Int = 1,
     var createdAt: Instant = Instant.now(),
     var updatedAt: Instant = Instant.now(),
     var lastSeenAt: Instant = Instant.now(),

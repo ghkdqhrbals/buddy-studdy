@@ -1,4 +1,5 @@
 package com.buddystudy.backend.study.application.model
+import com.buddystudy.study.domain.entity.QuestionFormat
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
@@ -24,6 +25,14 @@ fun StudyRecordProjection.toRecordResponse(
     }
     return StudyRecordResponse(
         id = id,
+        questionFormat = QuestionFormat.valueOf(questionFormat),
+        multipleChoice = if (questionFormat == "MULTIPLE_CHOICE") MultipleChoiceResponse(
+            options = QuestionChoiceCodec().decode(choiceOptionsJson).map { MultipleChoiceOptionResponse(it.id, it.text) },
+            selectedOptionId = selectedOptionId,
+            correctOptionId = correctOptionId.takeIf { selectedOptionId != null },
+            isCorrect = selectedOptionId?.let { it == correctOptionId },
+            explanation = (explanation ?: choiceExplanation).takeIf { selectedOptionId != null },
+        ) else null,
         question = QuestionItemResponse(question = question, expectedAnswerHint = expectedAnswerHint, createdAt = createdAt),
         answer = answer,
         gradingResult = score?.takeIf { recordType == StudyRecordType.QUESTION && source != "custom_question" }?.let {

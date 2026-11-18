@@ -87,6 +87,10 @@ struct RecordsUseCase {
         )
     }
 
+    func submitChoice(registration: RemotePushRegistration, recordID: String, selectedOptionId: String, sourceLanguage: String) async throws -> StudyRecord {
+        try await repository.submitChoice(registration: registration, recordID: recordID, selectedOptionId: selectedOptionId, sourceLanguage: sourceLanguage)
+    }
+
     func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
         correlationID: String,

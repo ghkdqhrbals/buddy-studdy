@@ -54,6 +54,11 @@ class StudyRecord private constructor(
 
     fun toProjection() = StudyRecordProjection(
         id = question.id.toString(),
+        questionFormat = question.questionFormat,
+        choiceOptionsJson = question.choiceOptionsJson,
+        correctOptionId = question.correctOptionId,
+        choiceExplanation = question.choiceExplanation,
+        selectedOptionId = question.selectedOptionId,
         question = question.question,
         expectedAnswerHint = question.hint,
         createdAt = question.createdAt,
@@ -130,6 +135,11 @@ data class StudyRecordState(
     val aiResponseSourceLanguage: String? = null,
     val recordType: StudyRecordType = StudyRecordType.QUESTION,
     val voiceRecordId: Long? = null,
+    val questionFormat: String = "FREE_TEXT",
+    val choiceOptionsJson: String? = null,
+    val correctOptionId: String? = null,
+    val choiceExplanation: String? = null,
+    val selectedOptionId: String? = null,
 )
 
 data class StudyRecordStats(
@@ -204,4 +214,9 @@ data class StudyRecordProjection(
     val aiResponseSourceLanguage: String? = null,
     val recordType: StudyRecordType = StudyRecordType.QUESTION,
     val voiceRecordId: Long? = null,
+    val questionFormat: String = "FREE_TEXT",
+    val choiceOptionsJson: String? = null,
+    val correctOptionId: String? = null,
+    val choiceExplanation: String? = null,
+    val selectedOptionId: String? = null,
 )

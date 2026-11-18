@@ -13,7 +13,17 @@ import com.buddystudy.backend.community.application.model.FeedbackResponse
 import com.buddystudy.backend.community.application.model.NativeAdvertisementResponse
 import com.buddystudy.backend.community.application.model.UserBlockResponse
 
-interface CommunityUseCase {
+interface VotePublicQuestionUseCase {
+    suspend fun votePublicQuestion(
+        principal: Principal,
+        id: Long,
+        selectedOptionId: String,
+        language: String = "ko",
+        view: String = "localized",
+    ): CommunityQuestionResponse
+}
+
+interface CommunityUseCase : VotePublicQuestionUseCase {
     suspend fun getPublicQuestions(
         principal: Principal?,
         query: String?,

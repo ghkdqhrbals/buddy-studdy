@@ -39,6 +39,16 @@ deployment.
 
 ## Rules
 
+- The backend workflow reads the boolean repository variable
+  `BUDDYSTUDY_MULTIPLE_CHOICE_ENABLED` (default `false`), validates it, and writes
+  it into the backend runtime `.env`. Enabling it affects only generation admitted
+  through the multiple-choice-aware API contract or capable scheduled delivery;
+  API requests without `X-BuddyStudy-API-Version: 3` retain the legacy contract.
+  Do not force-update older iOS builds for this rollout. Build/deploy the backend
+  with the flag off, distribute the capable iOS release, and then enable the flag
+  through another backend-only deployment. Existing questions and recorded choices
+  survive disabling the generation flag.
+
 - A workflow must deploy one module. If two modules need to change, run two
   workflows.
 - LibreTranslate is an internal-only runtime on `buddystudy-net`. Its workflow
@@ -151,6 +161,12 @@ deployment.
   For the 1.2.0 preparation, `codex/personalized-feed-rollout` starts from the
   previously successful deployment configuration `9f49905e`, preserving its
   removal of health gates. Keep `promote_swarm=false` for an ordinary rollout.
+  For the notification-open fix, `codex/notification-open-deploy-20261108`
+  starts from the current private deploy `main`, removes dependency readiness
+  probes and Swarm runtime waits, and includes the template's manual Slack opt-out.
+  It retains the current MCP/OAuth,
+  social sign-in, voice, Promtail, and proxy settings; the older personalized-feed
+  ref predates these settings and must not be used for this release.
 - Backend administrator recovery requires the exact `RESET admin` confirmation
   and a temporary cost-12 BCrypt hash in
   `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH`. It must never accept or print a

@@ -18,6 +18,8 @@ spring:
         region: ${AWS_REGION:ap-northeast-2}
 
 buddystudy:
+  multiple-choice:
+    enabled: ${BUDDYSTUDY_MULTIPLE_CHOICE_ENABLED:false}
   logging:
     api:
       detail: ${API_LOG_DETAIL:detailed}

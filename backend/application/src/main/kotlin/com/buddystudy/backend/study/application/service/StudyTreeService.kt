@@ -175,7 +175,7 @@ class StudyTreeService(
         if (root.id != study.id && command.active) {
             studies.save(root)
         }
-        return savedStudy.toStudyRoomResponse()
+        return savedStudy.toStudyRoomResponse(effectiveQuestionFormatPreference = root.questionFormatPreference)
     }
 
     private companion object {

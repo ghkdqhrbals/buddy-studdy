@@ -26,4 +26,5 @@ data class TranslatedQuestionContent(
     val topic: String,
     val question: String,
     val hint: String?,
+    val choiceOptionsJson: String? = null,
 )
