@@ -1,5 +1,6 @@
 'use strict';
 const id = new URLSearchParams(location.search).get('id');
+const hasValidRequest = !!id && /^[A-Za-z0-9_-]{43}$/.test(id);
 const socialResult = new URLSearchParams(location.search).get('login_result') || '';
 if (socialResult) {
   const clean = new URL(location.href);
@@ -24,18 +25,21 @@ function translate() {
   document.querySelectorAll('[data-ko]').forEach(node => { node.textContent = node.dataset[language]; });
   document.querySelectorAll('[data-scope]').forEach(node => { node.hidden = !grantedScopes.has(node.dataset.scope); });
   document.getElementById('login-method').textContent = passwordMode ? text('인증번호로 로그인', 'Sign in with a code') : text('비밀번호로 로그인', 'Sign in with a password');
+  document.getElementById('email-submit').textContent = passwordMode ? text('로그인', 'Sign in') : text('인증번호 받기', 'Send verification code');
   document.getElementById('language').textContent = language === 'ko' ? 'English' : '한국어';
   const titles = {
+    entry: text('로그인을 다시 시작하세요', 'Start a new sign-in'),
     choose: text(manage ? '연결 관리 로그인' : 'BuddyStudy 로그인', manage ? 'Manage connections' : 'Sign in to BuddyStudy'),
-    email: text(manage ? '연결 관리 로그인' : 'BuddyStudy 로그인', manage ? 'Manage connections' : 'Sign in to BuddyStudy'),
+    email: passwordMode ? text('이메일·비밀번호 로그인', 'Email and password') : text('이메일 인증번호 로그인', 'Email verification code'),
     code: text('이메일을 확인하세요', 'Check your email'),
     terms: text('필수 약관 확인', 'Required terms'),
     consent: text('ChatGPT에 연결', 'Connect to ChatGPT'),
     connections: text('연결된 앱', 'Connected apps'),
   };
   const descriptions = {
+    entry: text(manage ? '아래에서 연결 관리 로그인을 다시 시작해 주세요.' : 'ChatGPT에서 BuddyStudy의 연결을 눌러 시작하세요. 이 주소만으로는 새 연결을 만들 수 없습니다.', manage ? 'Open connection management below to sign in again.' : 'In ChatGPT, select Connect for BuddyStudy. This page cannot start a new connection by itself.'),
     choose: text(manage ? '로그인하고 내 계정에 연결된 앱을 관리하세요.' : '로그인하면 내 프로필과 학습 기록을 ChatGPT에서 확인할 수 있습니다.', manage ? 'Sign in to manage apps connected to your account.' : 'Sign in to view your profile and learning records in ChatGPT.'),
-    email: text('연결할 계정의 이메일을 입력하세요.', 'Enter your BuddyStudy account email.'),
+    email: passwordMode ? text('이메일로 가입한 BuddyStudy 계정의 이메일과 비밀번호를 입력하세요.', 'Enter the email and password for your email-registered BuddyStudy account.') : text('BuddyStudy 계정 이메일로 인증번호를 보내드립니다.', 'Receive a verification code at your BuddyStudy account email.'),
     code: text(`${emailInput.value.trim()} 메일함을 확인하세요.`, `Enter the code sent to ${emailInput.value.trim()}.`),
     terms: text('동의한 내용은 BuddyStudy 계정에 저장됩니다.', 'Your choices are saved to your BuddyStudy account.'),
     consent: text(grantedScopes.has('learning:write') ? 'ChatGPT에서 내 학습을 이어갑니다.' : 'BuddyStudy 학습 기록을 공유합니다.', grantedScopes.has('learning:write') ? 'Continue your learning in ChatGPT.' : 'Share your BuddyStudy learning records.'),
@@ -56,6 +60,7 @@ function setStage(next) {
   document.getElementById('terms').hidden = stage !== 'terms';
   document.getElementById('consent').hidden = stage !== 'consent';
   document.getElementById('connections').hidden = stage !== 'connections';
+  document.getElementById('connection-entry').hidden = stage !== 'entry';
   translate();
   if (stage === 'email') emailInput.focus();
   else if (stage === 'code') document.getElementById('code').focus();
@@ -64,7 +69,7 @@ function setStage(next) {
 document.getElementById('language').addEventListener('click', () => { language = language === 'ko' ? 'en' : 'ko'; translate(); });
 translate();
 async function request(path, body) {
-  if (!id || !/^[A-Za-z0-9_-]{43}$/.test(id)) throw new Error(text('ChatGPT에서 연결을 다시 시작해 주세요.', 'Restart the connection from ChatGPT.'));
+  if (!hasValidRequest) throw new Error(text('ChatGPT에서 연결을 다시 시작해 주세요.', 'Restart the connection from ChatGPT.'));
   const response = await fetch(path, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OAuth-Intent': 'connect'}, body: JSON.stringify({id, ...body})});
   if (!response.ok) throw new Error(text('요청이 만료되었습니다. 연결을 다시 시작해 주세요.', 'This request expired. Restart the connection.'));
   return response.json();
@@ -75,13 +80,14 @@ async function busy(action) {
   try { await action(); } catch (error) { message.textContent = error.message; }
   finally { document.querySelectorAll('button').forEach(button => { button.disabled = false; }); syncTermsButton(); }
 }
-document.getElementById('login-method').addEventListener('click', () => {
-  passwordMode = !passwordMode;
+function setPasswordMode(enabled) {
+  passwordMode = enabled;
   document.getElementById('password-fields').hidden = !passwordMode;
   document.getElementById('password').required = passwordMode;
   document.getElementById('password').value = '';
   translate();
-});
+}
+document.getElementById('login-method').addEventListener('click', () => setPasswordMode(!passwordMode));
 async function signedIn(accountEmail = emailInput.value.trim().toLowerCase()) {
   document.getElementById('password').value = '';
   const session = await request('/oauth/session', {});
@@ -138,7 +144,8 @@ document.getElementById('review-terms').addEventListener('click', () => busy(asy
   if (pendingTerms.length) { renderTerms(); setStage('terms'); }
   else message.textContent = text('필수 약관에 모두 동의한 상태입니다.', 'All required terms have been accepted.');
 }));
-document.getElementById('login-email').addEventListener('click', () => setStage('email'));
+document.getElementById('login-password').addEventListener('click', () => { setPasswordMode(true); setStage('email'); });
+document.getElementById('login-email').addEventListener('click', () => { setPasswordMode(false); setStage('email'); });
 document.getElementById('back-to-methods').addEventListener('click', () => setStage('choose'));
 for (const provider of ['apple', 'google']) {
   document.getElementById(`login-${provider}`).addEventListener('click', () => busy(async () => {
@@ -147,16 +154,23 @@ for (const provider of ['apple', 'google']) {
   }));
 }
 async function initialize() {
+  if (!hasValidRequest) { setStage('entry'); return; }
   await busy(async () => {
     const response = await fetch('/oauth/login-options', {credentials: 'same-origin'});
     if (!response.ok) throw new Error(text('로그인 정보를 불러오지 못했습니다. 새로고침해 주세요.', 'Could not load sign-in options. Refresh this page.'));
     const options = await response.json();
     for (const provider of ['apple', 'google']) document.getElementById(`login-${provider}`).hidden = !options.providers.includes(provider);
-    const session = await request('/oauth/session', {});
-    grantedScopes = new Set(session.scopes);
-    translate();
-    const state = await request('/oauth/login-state', {result: socialResult});
+    let state;
+    try {
+      const session = await request('/oauth/session', {});
+      grantedScopes = new Set(session.scopes);
+      state = await request('/oauth/login-state', {result: socialResult});
+    } catch (error) {
+      setStage('entry');
+      throw error;
+    }
     manage = state.managementOnly;
+    translate();
     if (state.verified) {
       await signedIn(state.email || '');
     } else if (new URLSearchParams(location.search).has('login_error')) {
