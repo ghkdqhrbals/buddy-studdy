@@ -86,7 +86,7 @@ is checked every 30 seconds after that grace period, so a write burst can
 temporarily exceed those sizes.
 If Promtail restarts while it still has unread data in a renamed file, or Loki
 is unavailable long enough for a fourth rotation, those unshipped audit/error
-lines can be lost. Loki retains successfully shipped logs for seven days.
+lines can be lost. Loki retains successfully shipped logs for 30 days.
 
 Container stdout/stderr uses Docker's bounded `local` log driver (10 MiB times
 three files, compressed) independently of these Nginx spools. See the main

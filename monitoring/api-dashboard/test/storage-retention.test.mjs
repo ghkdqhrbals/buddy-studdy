@@ -94,12 +94,12 @@ async function waitForFile(filePath) {
   assert.fail(`timed out waiting for ${filePath}`);
 }
 
-test("Loki compacts logs into the explicit seven-day retention window", async () => {
+test("Loki compacts logs into the explicit 30-day retention window", async () => {
   const config = await fs.readFile(lokiConfigPath, "utf8");
 
-  assert.match(config, /^  retention_period: 168h$/m);
+  assert.match(config, /^  retention_period: 720h$/m);
   assert.doesNotMatch(config, /retention_stream:/);
-  assert.match(config, /^  max_query_lookback: 168h$/m);
+  assert.match(config, /^  max_query_lookback: 720h$/m);
   assert.match(config, /^  working_directory: \/loki\/compactor$/m);
   assert.match(config, /^  compaction_interval: 10m$/m);
   assert.match(config, /^  apply_retention_interval: 10m$/m);

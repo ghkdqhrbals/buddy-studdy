@@ -403,6 +403,7 @@ test("backend rollout preserves monitoring and labeled Loki errors alert Slack",
   for (const localName of [
     "blocks",
     "fallback",
+    "detail",
     "errorClass",
     "traceID",
     "occurredAt",
@@ -488,6 +489,8 @@ test("backend rollout preserves monitoring and labeled Loki errors alert Slack",
   );
   assert.match(monitoringDeploy, /must not link to the static alert-rule GeneratorURL/);
   assert.doesNotMatch(monitoringDeploy, /\.Annotations\.logs_url.*오류 로그 보기/);
+  assert.ok(provisionedPayload.includes('with index .Annotations "error"'));
+  assert.ok(provisionedPayload.includes('"expand" false "text" (coll.Dict "type" "plain_text" "text" $detail)'));
   assert.match(alert, /발생 시각/);
   assert.doesNotMatch(alert, /요청 위치|코드 위치|로그 식별자/);
   assert.match(alert, /occurred_at: '\{\{ \$labels\.occurred_at \}\}'/);

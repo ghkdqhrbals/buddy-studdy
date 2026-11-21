@@ -41,6 +41,10 @@ contactPoints:
                 {{- end -}}
                 {{- $$fallback = printf "[발생] Backend ERROR · %s · trace %s" $$errorClass $$traceID -}}
                 {{- $$blocks = coll.Append (coll.Dict "type" "section" "text" (coll.Dict "type" "mrkdwn" "text" $$message)) $$blocks -}}
+                {{- with index .Annotations "error" -}}
+                  {{- $$detail := printf "상세 오류\n%.2990s" . -}}
+                  {{- $$blocks = coll.Append (coll.Dict "type" "section" "expand" false "text" (coll.Dict "type" "plain_text" "text" $$detail)) $$blocks -}}
+                {{- end -}}
               {{- end -}}
               {{ coll.Dict "text" $$fallback "blocks" $$blocks | data.ToJSON }}
       - uid: buddystudy-codex-incident-autofix

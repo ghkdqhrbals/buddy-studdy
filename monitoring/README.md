@@ -21,7 +21,7 @@ bounding Loki alone does not constrain Nginx files or Docker container output.
 
 | Storage path | Bound | Trade-off |
 | --- | --- | --- |
-| Loki `/loki` | All streams are retained for 168 hours. The singleton compactor runs and applies retention every 10 minutes, then waits 2 hours before deleting marked chunks. | The window remains seven days, but deletion is asynchronous and time-based rather than a byte quota. A sudden seven-day volume spike can still require additional disk. Expired chunks cannot be queried after deletion. |
+| Loki `/loki` | All streams are retained for 30 days. The singleton compactor runs and applies retention every 10 minutes, then waits 2 hours before deleting marked chunks. | Deletion is asynchronous and time-based rather than a byte quota. A volume spike can still require additional disk. Expired chunks cannot be queried after deletion. |
 | Nginx access spool | Rotate at 8 MiB and keep 3 archives plus the active file (about 32 MiB at normal rollover). | The rotator waits 60 seconds at startup and then checks every 30 seconds, so a burst can temporarily exceed the threshold. Removing the oldest archive can lose entries that Promtail has not shipped yet. |
 | Nginx error spool | Rotate at 2 MiB and keep 3 archives plus the active file (about 8 MiB at normal rollover). | The same 30-second burst allowance and unshipped-line loss apply. |
 | Docker container output | Docker `local` driver, 10 MiB per file, 3 files, compression enabled, for every Compose service and TestZone-managed MySQL/Redis container. | `docker logs` exposes only the retained rotations; older stdout/stderr is discarded. |
