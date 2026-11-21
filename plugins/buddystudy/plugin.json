@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "buddystudy",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Create studies, practice questions, submit answers, receive grades and manage your own BuddyStudy learning records in ChatGPT.",
   "author": {
     "name": "GYUMIN HWANGBO",
@@ -90,7 +90,7 @@
         "demo_recording_url": "https://ghkdqhrbals.github.io/buddy-studdy/chatgpt-demo-2026-11-01.html"
       },
       "publication": {
-        "release_notes": "Adds separately consented profile and saved learning-context reads without changing existing learning read/write/delete scope boundaries. Coalesces asynchronous process reads within a bounded wait to help question and grading flows reach their saved result. Supports all countries and clarifies the shared monthly question allowance and usage-limit errors.",
+        "release_notes": "Makes email/password sign-in directly available on the BuddyStudy connection screen, separately from emailed verification codes. Invalid or expired connection links explain how to restart from ChatGPT instead of displaying a sign-in form that cannot complete. Existing account authentication, explicit learning/profile consent, permissions and usage limits are unchanged.",
         "translations": {
           "ko-KR": {
             "subtitle": "ChatGPT에서 이어가는 내 학습",

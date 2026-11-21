@@ -34,6 +34,7 @@ input::placeholder { color: #96969c; }
 .primary, .secondary { min-height: 50px; border-radius: 25px; padding: 12px 16px; font-weight: 650; font-size: 15px; }
 .primary { background: #fff; color: #080808; }
 .secondary { color: #fff; background: #2c2c2e; border: 1px solid #454548; }
+.entry-link { display: block; text-align: center; text-decoration: none; }
 form > .primary { display: block; width: 100%; margin-top: 22px; }
 .text-button { color: var(--muted); background: transparent; padding: 8px 0; min-height: 40px; font-size: 13px; text-decoration: none; }
 .text-button:hover { color: #fff; }

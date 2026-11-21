@@ -853,3 +853,9 @@ ACTIVE provider/subject matching, signed-token validation and a callback-only
 one-time result plus the initiating browser cookie complete login. The existing
 password/code login, required-terms gate and scoped learning/profile consent remain
 in force. Native iOS login is unchanged.
+
+The browser chooser exposes password and emailed-code login separately. An absent
+or invalid request ID prevents initialization calls and hides credential forms;
+a rejected session check also switches to restart guidance. The explicit
+`/oauth/manage` recovery link creates a fresh management-only browser request,
+not an authorization grant for ChatGPT.

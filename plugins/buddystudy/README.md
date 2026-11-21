@@ -106,6 +106,23 @@ scan with no findings. Reviewer credentials were saved and checked only in the
 private portal fields after the owner's explicit approval.
 
 Existing EMAIL-provider password login supports reviewer access without OTP.
+Password sign-in is a separate first-screen choice from emailed-code sign-in.
+For a new OAuth connection, reviewers must start **Connect** in the host, choose
+**Sign in with a password**, enter the dedicated account from the portal's private
+reviewer fields, and allow the displayed learning/profile access. That account
+must already have all required BuddyStudy terms accepted and usable sample data.
+No email code, social account, app installation, API key or account registration
+is needed for the password path. Keep the actual credentials out of this package.
+
+Use `https://api.ghkdqhrbals.org/oauth/manage` as the standalone credential-check
+URL in private reviewer instructions. It permits a fresh password sign-in and
+connection management, but does not authorize a new host connection. The bare
+`/oauth/connect.html` URL has no authorization request or browser cookie and must
+not be supplied as a standalone login URL. Missing or expired host requests show
+restart instructions instead of a credential form that cannot complete.
+
+The November 18 rejection follow-up and new-connection verification are in
+[OAuth review verification](../../docs/verification/2026-11-18-plugin-oauth-review.md).
 The original private development connection retains learning-only scopes. The
 owner approved an additional `BuddyStudy Review 0.2.1` development connection for
 verification; its 28-tool catalog includes `get_my_context`, and a real host

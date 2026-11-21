@@ -44,6 +44,11 @@ content follows ChatGPT's own controls. See [MCP server](MCP_SERVER.md) and
 [plugin setup](../plugins/buddystudy/README.md). Production activation and public
 plugin publication are separate rollout steps.
 
+Password and emailed-code sign-in are separate first-screen choices. Missing,
+malformed or expired connection requests show restart instructions instead of an
+unusable login form. Standalone connection management remains available at
+`/oauth/manage`; it cannot create a ChatGPT connection without a host request.
+
 ## Core User Flows
 
 ### First Launch
